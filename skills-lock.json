@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "scopeguard": {
+      "source": "OMouta/scopeguard",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "b3cf1e0f2b8e6d73d2e0a2af6f96bc106eb1b00f7c0eab33de6db91c6408b61c"
+    },
+    "virtuous-laziness": {
+      "source": "omouta/virtuous-laziness",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "0e88109e509f44d5b72b7962b6ae722a719ecdba89e2874e98071f4e14b09088"
+    }
+  }
+}
