@@ -99,3 +99,20 @@ Evidence:
 
 Known gaps:
 - In-app browser verification could not run because the Browser backend was unavailable for `iab`.
+
+### TASK-002
+
+Status: done
+
+Evidence:
+- Added versioned workspace model types in `crates/fleck-core/src/model.rs`.
+- Added stable `ObjectId` type and `CURRENT_WORKSPACE_FORMAT_VERSION`.
+- Added document fields for metadata, canvas settings, layers, image objects, selections, guides, export areas, outputs, recipes, assets, object groups, history, and document settings.
+- Added validation for duplicate IDs, missing references, invalid format versions, invalid opacity, non-positive export bounds, empty output filenames, and invalid output sizing.
+- Added JSON serialization/deserialization coverage through serde.
+- Added tests for empty workspace validation, full JSON round-trip, duplicate IDs, missing asset references, and invalid output settings.
+- Verified `cargo fmt --all`.
+- Verified `cargo test --workspace`.
+
+Known gaps:
+- This task defines the model and validation only. Save/load persistence, migrations, and durable `.fleck` container behavior remain for TASK-003.

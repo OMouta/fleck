@@ -3,6 +3,8 @@
 //! This crate owns authoritative document state. React, Tauri, and rendering
 //! layers must access document behavior through explicit core APIs.
 
+pub mod model;
+
 pub const APP_NAME: &str = "Fleck";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,11 +40,9 @@ mod tests {
 
     #[test]
     fn core_declares_document_ownership() {
-        assert!(
-            ownership_boundaries()
-                .iter()
-                .any(|boundary| boundary.owner == "Rust core"
-                    && boundary.responsibility.contains("document state"))
-        );
+        assert!(ownership_boundaries()
+            .iter()
+            .any(|boundary| boundary.owner == "Rust core"
+                && boundary.responsibility.contains("document state")));
     }
 }

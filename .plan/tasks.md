@@ -52,7 +52,7 @@ Acceptance criteria:
 
 ### TASK-002: Implement Versioned Workspace Document Model
 
-Status: open
+Status: done
 
 Requirements: REQ-002, REQ-004, REQ-005, REQ-006, REQ-007, REQ-009, REQ-010, REQ-011, REQ-013
 
