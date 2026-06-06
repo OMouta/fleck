@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [lib]
-name = "fleck_desktop"
+name = "fleck_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 path = "src/lib.rs"
 

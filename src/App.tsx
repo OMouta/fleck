@@ -1,16 +1,14 @@
-const ownership = [
-  ["Rust core", "document state"],
-  ["React", "interface"],
-  ["Skia", "rendering"],
-  ["Tauri", "native shell"]
-] as const;
-
 function App() {
   return (
     <main className="app-shell">
       <header className="top-bar">
         <strong>Fleck</strong>
-        <span>Raster editor workspace</span>
+        <nav aria-label="Main menu">
+          <button type="button">File</button>
+          <button type="button">Edit</button>
+          <button type="button">View</button>
+          <button type="button">Export</button>
+        </nav>
       </header>
 
       <section className="editor-shell" aria-label="Fleck editor shell">
@@ -22,25 +20,29 @@ function App() {
 
         <section className="canvas-region" aria-label="Workspace canvas">
           <div className="canvas-placeholder">
-            <h1>Fleck Workspace</h1>
-            <p>Task 1 scaffold: desktop shell, frontend app, and Rust workspace boundaries.</p>
+            <div className="empty-workspace">
+              <h1>Untitled Workspace</h1>
+              <div className="empty-actions" aria-label="Workspace actions">
+                <button type="button">Open Image</button>
+                <button type="button">New Workspace</button>
+                <button type="button">Create Export Area</button>
+              </div>
+            </div>
           </div>
         </section>
 
         <aside className="side-panels" aria-label="Editor panels">
-          <Panel title="Inspector" items={["No selection", "Rust owns document state"]} />
-          <Panel title="Layers" items={["No layers yet"]} />
-          <Panel title="Exports" items={["No export areas yet"]} />
-          <Panel title="History" items={["No operations yet"]} />
+          <Panel title="Inspector" items={["No selection"]} />
+          <Panel title="Layers" items={["Background"]} />
+          <Panel title="Exports" items={["No export areas"]} />
+          <Panel title="History" items={["New workspace"]} />
         </aside>
       </section>
 
       <footer className="status-bar">
-        {ownership.map(([owner, responsibility]) => (
-          <span key={owner}>
-            {owner}: {responsibility}
-          </span>
-        ))}
+        <span>100%</span>
+        <span>0 x 0 px</span>
+        <span>No selection</span>
       </footer>
     </main>
   );

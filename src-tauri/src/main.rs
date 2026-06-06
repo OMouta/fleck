@@ -1,3 +1,3 @@
 fn main() {
-    fleck_desktop::run();
+    fleck_desktop_lib::run();
 }

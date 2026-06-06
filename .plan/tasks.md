@@ -10,7 +10,7 @@ Task statuses: `open`, `in_progress`, `done`, `blocked`, `deferred`.
 
 ### TASK-001: Scaffold App, Workspace, And Build System
 
-Status: in_progress
+Status: done
 
 Requirements: REQ-001, REQ-003, REQ-036, REQ-046
 

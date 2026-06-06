@@ -81,7 +81,7 @@ Do not mark a requirement covered without adding evidence here. Evidence should 
 
 ### TASK-001
 
-Status: partial
+Status: done
 
 Evidence:
 - Added Vite React app scaffold in `src/`, `index.html`, `vite.config.ts`, `tsconfig.json`, and `package.json`.
@@ -93,8 +93,9 @@ Evidence:
 - Verified `npm run build`.
 - Verified `npm run tauri -- --version` reports `tauri-cli 2.11.2`.
 - Verified Vite dev server responded with HTTP 200 at `http://127.0.0.1:1420`.
+- Verified `cargo test --workspace`.
+- Verified `npm run desktop:build`.
+- Verified built app process starts from `target/release/fleck-desktop.exe`, then stopped it.
 
 Known gaps:
-- `cargo test --workspace` could not run locally because `cargo` is not installed in this environment.
-- Tauri desktop launch could not be verified locally for the same reason.
 - In-app browser verification could not run because the Browser backend was unavailable for `iab`.

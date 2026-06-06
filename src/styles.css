@@ -42,6 +42,24 @@ button {
   font-size: 13px;
 }
 
+.top-bar nav {
+  display: flex;
+  gap: 4px;
+}
+
+.top-bar nav button {
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #c9d1d9;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.top-bar nav button:hover {
+  background: #252b32;
+}
+
 .top-bar {
   border-bottom: 1px solid #2a3036;
   padding: 0 14px;
@@ -113,16 +131,36 @@ button {
   text-align: center;
 }
 
-.canvas-placeholder h1 {
+.empty-workspace {
+  display: grid;
+  gap: 16px;
+  justify-items: center;
+}
+
+.empty-workspace h1 {
   margin: 0 0 8px;
   font-size: 28px;
   font-weight: 650;
 }
 
-.canvas-placeholder p {
-  max-width: 560px;
-  margin: 0;
-  color: #aeb8c2;
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.empty-actions button {
+  border: 1px solid #3d4854;
+  border-radius: 6px;
+  background: #222932;
+  color: #f5f7fa;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.empty-actions button:hover {
+  background: #2b333d;
 }
 
 .side-panels {
