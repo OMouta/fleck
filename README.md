@@ -1,4 +1,7 @@
-# Fleck
+<div align="center">
+  <img src="./assets/fleck-icon.png" alt="Fleck Logo" width="200" />
+  <h1>Fleck</h1>
+</div>
 
 Fleck is an open-source, cross-platform raster image editor.
 
