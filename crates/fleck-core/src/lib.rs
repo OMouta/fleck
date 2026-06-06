@@ -4,6 +4,7 @@
 //! layers must access document behavior through explicit core APIs.
 
 pub mod model;
+pub mod persistence;
 
 pub const APP_NAME: &str = "Fleck";
 

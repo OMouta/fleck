@@ -70,7 +70,7 @@ Acceptance criteria:
 
 ### TASK-003: Implement `.fleck` Save And Load
 
-Status: open
+Status: done
 
 Requirements: REQ-004, REQ-012, REQ-013, REQ-014
 

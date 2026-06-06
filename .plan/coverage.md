@@ -116,3 +116,22 @@ Evidence:
 
 Known gaps:
 - This task defines the model and validation only. Save/load persistence, migrations, and durable `.fleck` container behavior remain for TASK-003.
+
+### TASK-003
+
+Status: done
+
+Evidence:
+- Added `.fleck` package persistence in `crates/fleck-core/src/persistence.rs`.
+- Added `WorkspacePackage` with `file_format_version`, `workspace`, and `embedded_assets`.
+- Added JSON save/load helpers for readers, writers, strings, and paths.
+- Added package validation for embedded asset blob consistency.
+- Added linked asset missing-file reports with asset ID, display name, original path, and resolved path for relinking UI.
+- Added migration path for legacy v0 package shape into the current package format.
+- Added warning path for newer file and workspace format versions when the known shape can still be read.
+- Added tests for current save/load round-trip, path save/load, embedded asset storage requirements, legacy migration, newer-version warnings, and missing linked asset metadata.
+- Verified `cargo fmt --all`.
+- Verified `cargo test --workspace`.
+
+Known gaps:
+- The `.fleck` package is currently an inspectable JSON envelope. A compressed/archive container can be introduced later if the project records that decision.
