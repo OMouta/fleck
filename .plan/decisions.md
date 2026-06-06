@@ -27,3 +27,10 @@ Source: `.plan/spec.md`
 ## Deferrals
 
 None yet.
+
+## Environment Gaps
+
+- ENV-001: Local Rust verification is blocked because `rustc` and `cargo` are not installed in the current shell.
+  - Affected task: TASK-001.
+  - Impact: Rust workspace and Tauri desktop launch cannot be verified locally yet.
+  - Mitigation: CI installs stable Rust and runs `cargo test --workspace`; local verification should be rerun once Rust is available.

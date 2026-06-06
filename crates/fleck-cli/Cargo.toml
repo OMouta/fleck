@@ -1,0 +1,16 @@
+[package]
+name = "fleck-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "fleck"
+path = "src/main.rs"
+
+[dependencies]
+fleck-core = { path = "../fleck-core" }
+
+[lints]
+workspace = true

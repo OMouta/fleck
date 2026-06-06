@@ -1,0 +1,27 @@
+[package]
+name = "fleck-desktop"
+version = "0.1.0"
+description = "Fleck desktop shell"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "fleck_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "fleck-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.4.1", features = [] }
+
+[dependencies]
+fleck-core = { path = "../crates/fleck-core" }
+tauri = { version = "2.9.5", features = [] }
+tauri-plugin-opener = "2.5.0"
+
+[lints]
+workspace = true

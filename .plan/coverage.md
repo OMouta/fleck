@@ -76,3 +76,25 @@ This is a pre-implementation coverage map. No requirement is marked implemented 
 ## Evidence Rules For Future Agents
 
 Do not mark a requirement covered without adding evidence here. Evidence should include changed files, tests run, manual checks, and known gaps. If a task implements only part of a requirement, keep the requirement partial and name the missing behavior.
+
+## Implementation Evidence
+
+### TASK-001
+
+Status: partial
+
+Evidence:
+- Added Vite React app scaffold in `src/`, `index.html`, `vite.config.ts`, `tsconfig.json`, and `package.json`.
+- Added Tauri v2 desktop scaffold in `src-tauri/`.
+- Added Rust workspace with `crates/fleck-core`, `crates/fleck-render`, `crates/fleck-cli`, and `src-tauri`.
+- Added architecture note in `docs/architecture.md`.
+- Added CI workflow in `.github/workflows/ci.yml`.
+- Verified `npm install`.
+- Verified `npm run build`.
+- Verified `npm run tauri -- --version` reports `tauri-cli 2.11.2`.
+- Verified Vite dev server responded with HTTP 200 at `http://127.0.0.1:1420`.
+
+Known gaps:
+- `cargo test --workspace` could not run locally because `cargo` is not installed in this environment.
+- Tauri desktop launch could not be verified locally for the same reason.
+- In-app browser verification could not run because the Browser backend was unavailable for `iab`.
