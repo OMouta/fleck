@@ -5,8 +5,10 @@ import { Canvas } from "@/components/fleck/canvas";
 import { SidePanel } from "@/components/fleck/side-panel";
 import { StatusBar } from "@/components/fleck/status-bar";
 import { CommandPalette } from "@/components/fleck/command-palette";
+import { WorkspaceDialogs } from "@/components/fleck/workspace-dialogs";
 import { TOOLS } from "@/lib/fleck-data";
 import { useUIStore } from "@/store/ui-store";
+import { useWorkspaceFilesStore } from "@/store/workspace-files-store";
 
 function App() {
   const paletteOpen = useUIStore((s) => s.paletteOpen);
@@ -15,13 +17,39 @@ function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      const mod = e.metaKey || e.ctrlKey;
+
+      if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
         togglePalette();
         return;
       }
+
+      // File shortcuts (routed through the workspace-file store, same as the menu)
+      if (mod) {
+        const files = useWorkspaceFilesStore.getState();
+        const key = e.key.toLowerCase();
+        if (key === "o") {
+          e.preventDefault();
+          files.openWorkspace();
+          return;
+        }
+        if (key === "s") {
+          e.preventDefault();
+          if (e.shiftKey) files.saveAs();
+          else files.save();
+          return;
+        }
+        if (key === "n" && !e.shiftKey) {
+          e.preventDefault();
+          files.newWorkspace();
+          return;
+        }
+        return; // leave other modifier combos alone
+      }
+
       // Tool shortcuts only when not typing and no modifier held
-      if (paletteOpen || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (paletteOpen || e.altKey) return;
       const target = e.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
       const match = TOOLS.find((t) => t.shortcut.toLowerCase() === e.key.toLowerCase());
@@ -41,6 +69,7 @@ function App() {
       </div>
       <StatusBar />
       <CommandPalette />
+      <WorkspaceDialogs />
     </main>
   );
 }

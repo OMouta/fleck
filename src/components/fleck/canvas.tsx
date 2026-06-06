@@ -2,6 +2,7 @@ import { Maximize2, Eye, Grid3x3, Ruler, FolderOpen, FilePlus2, Frame } from "lu
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/ui-store";
+import { useWorkspaceFilesStore } from "@/store/workspace-files-store";
 
 export function Canvas() {
   const activeTool = useUIStore((s) => s.activeTool);
@@ -13,6 +14,8 @@ export function Canvas() {
   const toggleRulers = useUIStore((s) => s.toggleRulers);
   const preview = useUIStore((s) => s.previewExport);
   const togglePreview = useUIStore((s) => s.togglePreviewExport);
+  const openImage = useWorkspaceFilesStore((s) => s.openImage);
+  const newWorkspace = useWorkspaceFilesStore((s) => s.newWorkspace);
 
   return (
     <div className="relative flex-1 overflow-hidden bg-background" aria-label="Workspace canvas">
@@ -29,8 +32,8 @@ export function Canvas() {
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-2">
-            <EmptyAction icon={FolderOpen} label="Open image" onClick={() => api.openImage()} primary />
-            <EmptyAction icon={FilePlus2} label="New workspace" onClick={() => api.newWorkspace()} />
+            <EmptyAction icon={FolderOpen} label="Open image" onClick={() => openImage()} primary />
+            <EmptyAction icon={FilePlus2} label="New workspace" onClick={() => newWorkspace()} />
             <EmptyAction icon={Frame} label="Create export area" onClick={() => api.createExportArea()} />
           </div>
         </div>

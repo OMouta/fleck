@@ -1,7 +1,9 @@
 import { Command, Save, Share2, Download, Undo2, Redo2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { useSaveWorkspace, useWorkspaceMeta } from "@/lib/queries";
+import { useWorkspaceMeta } from "@/lib/queries";
 import { useUIStore } from "@/store/ui-store";
+import { useWorkspaceFilesStore } from "@/store/workspace-files-store";
+import { FileMenu } from "@/components/fleck/file-menu";
 
 function FleckMark() {
   return (
@@ -23,7 +25,7 @@ function FleckMark() {
 export function MenuBar() {
   const setPaletteOpen = useUIStore((s) => s.setPaletteOpen);
   const { data: meta } = useWorkspaceMeta();
-  const save = useSaveWorkspace();
+  const save = useWorkspaceFilesStore((s) => s.save);
 
   return (
     <header className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-sidebar px-3">
@@ -34,7 +36,8 @@ export function MenuBar() {
         </div>
         <div className="h-4 w-px bg-border" />
         <nav className="hidden items-center gap-0.5 md:flex" aria-label="Main menu">
-          {["File", "Edit", "Layer", "Select", "Export", "View"].map((item) => (
+          <FileMenu />
+          {["Edit", "Layer", "Select", "Export", "View"].map((item) => (
             <button
               key={item}
               className="rounded-md px-2.5 py-1 text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
@@ -73,7 +76,7 @@ export function MenuBar() {
           </kbd>
         </button>
 
-        <IconButton label="Save workspace" shortcut="⌘S" onClick={() => save.mutate()}>
+        <IconButton label="Save workspace" shortcut="⌘S" onClick={() => save()}>
           <Save className="size-4" />
         </IconButton>
         <IconButton label="Share .fleck file" onClick={() => api.runCommand("share-workspace")}>

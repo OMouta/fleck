@@ -9,7 +9,14 @@
  *
  * See `docs/architecture.md`: Rust owns document truth, React owns UI.
  */
-import type { ExportArea, HistoryEntry, Layer, WorkspaceMeta } from "./fleck-data";
+import type {
+  ExportArea,
+  HistoryEntry,
+  Layer,
+  OpenWorkspaceResult,
+  RecentFile,
+  WorkspaceMeta,
+} from "./fleck-data";
 
 /** Returns the Tauri `invoke` if running inside the desktop shell, else null. */
 function getInvoke(): ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null {
@@ -93,7 +100,53 @@ export const api = {
     });
   },
 
-  // --- Actions (commands without immediate document reads) --------------------
+  // --- Workspace file operations ---------------------------------------------
+  // These commands open native dialogs and read/write `.fleck` files in the Rust
+  // core. The UI never parses or mutates workspace files itself — it only invokes
+  // these commands and renders the structured results. (Native dialog + recent-
+  // file persistence wiring on the Rust side is TASK-020; the mock below stands
+  // in until then.)
+
+  /**
+   * Opens a native file picker, loads the chosen `.fleck` via the core, and
+   * returns load warnings + unresolved linked assets. Resolves to null if the
+   * user cancels the picker.
+   */
+  openWorkspace(): Promise<OpenWorkspaceResult | null> {
+    return bridge("open_workspace", {}, () => {
+      // Representative file that exercises both the version-warning and
+      // missing-linked-asset paths so those dialogs are demonstrable.
+      mockDoc.meta = {
+        name: "marketing-assets.fleck",
+        dirty: false,
+        layerCount: 0,
+        selectedCount: 0,
+        canvasSize: "1200 × 630 px",
+      };
+      return {
+        path: "C:/work/marketing-assets.fleck",
+        name: "marketing-assets.fleck",
+        warnings: [{ kind: "newer-workspace", found: 2, supported: 1 }],
+        missingAssets: [
+          {
+            assetId: "a1",
+            name: "hero-render.png",
+            path: "linked/hero-render.png",
+            resolvedPath: "C:/work/linked/hero-render.png",
+          },
+        ],
+      } satisfies OpenWorkspaceResult;
+    });
+  },
+
+  /** Opens a workspace by an explicit path (e.g. from the recent-files list). */
+  openWorkspacePath(path: string): Promise<OpenWorkspaceResult | null> {
+    return bridge("open_workspace_path", { path }, () => {
+      const name = path.split(/[\\/]/).pop() ?? path;
+      mockDoc.meta = { name, dirty: false, layerCount: 0, selectedCount: 0, canvasSize: "0 × 0 px" };
+      return { path, name, warnings: [], missingAssets: [] } satisfies OpenWorkspaceResult;
+    });
+  },
 
   openImage(): Promise<void> {
     return bridge("open_image", {}, () => undefined);
@@ -105,8 +158,31 @@ export const api = {
     });
   },
 
+  /** Opens a native save dialog; resolves to the chosen path, or null if cancelled. */
+  saveWorkspaceAs(): Promise<string | null> {
+    return bridge("save_workspace_as", {}, () => {
+      mockDoc.meta = { ...mockDoc.meta, name: "Copy of " + mockDoc.meta.name, dirty: false };
+      return "C:/work/" + mockDoc.meta.name;
+    });
+  },
+
+  getRecentFiles(): Promise<RecentFile[]> {
+    return bridge("get_recent_files", {}, () => [
+      { path: "C:/work/brand-assets.fleck", name: "brand-assets.fleck", openedAt: "2 hours ago" },
+      { path: "C:/work/marketing-assets.fleck", name: "marketing-assets.fleck", openedAt: "yesterday" },
+      { path: "C:/icons/app-icons.fleck", name: "app-icons.fleck", openedAt: "3 days ago" },
+    ]);
+  },
+
+  /** Opens a picker to relink a missing asset to a file on disk. */
+  relinkAsset(assetId: string): Promise<void> {
+    return bridge("relink_asset", { assetId }, () => undefined);
+  },
+
   newWorkspace(): Promise<void> {
-    return bridge("new_workspace", {}, () => undefined);
+    return bridge("new_workspace", {}, () => {
+      mockDoc.meta = { name: "Untitled.fleck", dirty: false, layerCount: 0, selectedCount: 0, canvasSize: "0 × 0 px" };
+    });
   },
 
   createExportArea(): Promise<void> {

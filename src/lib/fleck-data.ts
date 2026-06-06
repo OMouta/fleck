@@ -80,6 +80,38 @@ export type WorkspaceMeta = {
   canvasSize: string;
 };
 
+/**
+ * Workspace-file types mirror the Rust `fleck-core::persistence` DTOs so the UI
+ * consumes structured results from the backend instead of parsing `.fleck` files.
+ */
+export type LoadWarning =
+  | { kind: "migrated"; from: number; to: number }
+  | { kind: "newer-file"; found: number; supported: number }
+  | { kind: "newer-workspace"; found: number; supported: number };
+
+/** A linked asset the backend could not resolve when opening a workspace. */
+export type MissingAsset = {
+  assetId: string;
+  name: string;
+  /** Path as stored in the workspace (may be relative). */
+  path: string;
+  /** Absolute path the backend tried to resolve. */
+  resolvedPath: string;
+};
+
+export type OpenWorkspaceResult = {
+  path: string;
+  name: string;
+  warnings: LoadWarning[];
+  missingAssets: MissingAsset[];
+};
+
+export type RecentFile = {
+  path: string;
+  name: string;
+  openedAt: string;
+};
+
 export type HistoryEntry = {
   id: string;
   label: string;

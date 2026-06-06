@@ -13,6 +13,7 @@ export const queryKeys = {
   layers: ["document", "layers"] as const,
   exportAreas: ["document", "export-areas"] as const,
   history: ["document", "history"] as const,
+  recentFiles: ["workspace", "recent-files"] as const,
 };
 
 export function useWorkspaceMeta() {
@@ -29,6 +30,10 @@ export function useExportAreas() {
 
 export function useHistory() {
   return useQuery({ queryKey: queryKeys.history, queryFn: api.getHistory });
+}
+
+export function useRecentFiles() {
+  return useQuery({ queryKey: queryKeys.recentFiles, queryFn: api.getRecentFiles });
 }
 
 export function useToggleLayerVisibility() {
