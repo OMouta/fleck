@@ -31,7 +31,7 @@ Acceptance criteria:
 
 ### TASK-FE-001: Build Placeholder Editor Shell
 
-Status: open
+Status: done
 
 Requirements: REQ-037, REQ-052
 

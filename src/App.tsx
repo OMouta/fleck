@@ -1,63 +1,47 @@
+import { useEffect } from "react";
+import { MenuBar } from "@/components/fleck/menu-bar";
+import { ToolStrip } from "@/components/fleck/tool-strip";
+import { Canvas } from "@/components/fleck/canvas";
+import { SidePanel } from "@/components/fleck/side-panel";
+import { StatusBar } from "@/components/fleck/status-bar";
+import { CommandPalette } from "@/components/fleck/command-palette";
+import { TOOLS } from "@/lib/fleck-data";
+import { useUIStore } from "@/store/ui-store";
+
 function App() {
+  const paletteOpen = useUIStore((s) => s.paletteOpen);
+  const togglePalette = useUIStore((s) => s.togglePalette);
+  const setActiveTool = useUIStore((s) => s.setActiveTool);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        togglePalette();
+        return;
+      }
+      // Tool shortcuts only when not typing and no modifier held
+      if (paletteOpen || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+      const match = TOOLS.find((t) => t.shortcut.toLowerCase() === e.key.toLowerCase());
+      if (match) setActiveTool(match.id);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [paletteOpen, togglePalette, setActiveTool]);
+
   return (
-    <main className="app-shell">
-      <header className="top-bar">
-        <strong>Fleck</strong>
-        <nav aria-label="Main menu">
-          <button type="button">File</button>
-          <button type="button">Edit</button>
-          <button type="button">View</button>
-          <button type="button">Export</button>
-        </nav>
-      </header>
-
-      <section className="editor-shell" aria-label="Fleck editor shell">
-        <aside className="tool-strip" aria-label="Tool strip">
-          <button type="button" aria-label="Move tool">M</button>
-          <button type="button" aria-label="Selection tool">S</button>
-          <button type="button" aria-label="Export area tool">E</button>
-        </aside>
-
-        <section className="canvas-region" aria-label="Workspace canvas">
-          <div className="canvas-placeholder">
-            <div className="empty-workspace">
-              <h1>Untitled Workspace</h1>
-              <div className="empty-actions" aria-label="Workspace actions">
-                <button type="button">Open Image</button>
-                <button type="button">New Workspace</button>
-                <button type="button">Create Export Area</button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <aside className="side-panels" aria-label="Editor panels">
-          <Panel title="Inspector" items={["No selection"]} />
-          <Panel title="Layers" items={["Background"]} />
-          <Panel title="Exports" items={["No export areas"]} />
-          <Panel title="History" items={["New workspace"]} />
-        </aside>
-      </section>
-
-      <footer className="status-bar">
-        <span>100%</span>
-        <span>0 x 0 px</span>
-        <span>No selection</span>
-      </footer>
+    <main className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      <MenuBar />
+      <div className="flex flex-1 overflow-hidden">
+        <ToolStrip />
+        <Canvas />
+        <SidePanel />
+      </div>
+      <StatusBar />
+      <CommandPalette />
     </main>
-  );
-}
-
-function Panel({ title, items }: { title: string; items: string[] }) {
-  return (
-    <section className="panel" aria-label={title}>
-      <h2>{title}</h2>
-      <ul>
-        {items.map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
-    </section>
   );
 }
 
