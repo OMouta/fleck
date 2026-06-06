@@ -4,6 +4,7 @@ import { useWorkspaceMeta } from "@/lib/queries";
 import { useUIStore } from "@/store/ui-store";
 import { useWorkspaceFilesStore } from "@/store/workspace-files-store";
 import { FileMenu } from "@/components/fleck/file-menu";
+import { WindowControls } from "@/components/fleck/window-controls";
 
 function FleckMark() {
   return (
@@ -28,7 +29,10 @@ export function MenuBar() {
   const save = useWorkspaceFilesStore((s) => s.save);
 
   return (
-    <header className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-sidebar px-3">
+    <header
+      data-tauri-drag-region=""
+      className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-sidebar px-3"
+    >
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
           <FleckMark />
@@ -48,8 +52,8 @@ export function MenuBar() {
         </nav>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1.5">
+      <div data-tauri-drag-region="" className="flex flex-1 items-center justify-center gap-2">
+        <div className="pointer-events-none flex items-center gap-1.5">
           <span className="font-mono text-xs text-muted-foreground">{meta?.name ?? "Untitled.fleck"}</span>
           {meta?.dirty && <span className="size-1.5 rounded-full bg-warning" title="Unsaved changes" />}
         </div>
@@ -90,6 +94,8 @@ export function MenuBar() {
           <Download className="size-4" />
           Export all
         </button>
+
+        <WindowControls />
       </div>
     </header>
   );
