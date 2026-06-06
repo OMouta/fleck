@@ -92,7 +92,7 @@ Acceptance criteria:
 
 ### TASK-FE-002: Build Open, Save, And Workspace File UI
 
-Status: open
+Status: done
 
 Requirements: REQ-012, REQ-014, REQ-046, REQ-050
 
