@@ -202,7 +202,7 @@ Acceptance criteria:
 
 ### TASK-FE-004: Build Canvas Host And Navigation UI
 
-Status: open
+Status: done
 
 Requirements: REQ-024, REQ-026, REQ-027, REQ-037, REQ-045
 

@@ -42,6 +42,44 @@ export const TOOLS: Tool[] = [
   { id: "zoom", name: "Zoom", shortcut: "Z", hint: "Zoom into a point", icon: ZoomIn },
 ];
 
+// --- Geometry / viewport / rendering (mirror fleck-core::geometry + fleck-render) ---
+
+export type Point = { x: number; y: number };
+export type Size = { width: number; height: number };
+export type Rect = { x: number; y: number; width: number; height: number };
+
+/** Camera state (mirrors `geometry::Viewport`): origin in workspace units. */
+export type Viewport = {
+  origin: Point;
+  zoom: number;
+  screen: Size;
+};
+
+/** Mirrors `geometry::OverlaySettings`. */
+export type OverlaySettings = {
+  checkerboard: boolean;
+  guides: boolean;
+  pixelGrid: { enabled: boolean; minZoom: number };
+  selections: boolean;
+  transformHandles: boolean;
+  exportAreas: boolean;
+};
+
+export type ViewportFocusKind = "fit" | "selection" | "export-area" | "actual" | "pixel-perfect";
+
+/**
+ * Read-only workspace geometry needed to draw a frame, in workspace coordinates.
+ * Stands in for what `fleck-render` composites from core-owned state; the host
+ * applies the viewport transform and paints it.
+ */
+export type RenderModel = {
+  canvas: { width: number; height: number };
+  layers: { id: string; rect: Rect; color: string; opacity: number; visible: boolean }[];
+  exportAreas: { id: string; name: string; rect: Rect }[];
+  guides: { axis: "horizontal" | "vertical"; position: number }[];
+  selections: { id: string; rect: Rect }[];
+};
+
 export type BlendMode = "Normal" | "Multiply" | "Screen" | "Overlay" | "Darken" | "Lighten";
 
 export type Layer = {

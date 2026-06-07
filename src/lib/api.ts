@@ -17,10 +17,16 @@ import type {
   HistoryState,
   Layer,
   OpenWorkspaceResult,
+  Point,
   RecentFile,
+  Rect,
+  RenderModel,
+  Size,
+  ViewportFocusKind,
   WorkspaceMeta,
 } from "./fleck-data";
 import { COMMAND_DEFINITIONS } from "./command-registry";
+import { fitRect } from "./viewport";
 
 /** Returns the Tauri `invoke` if running inside the desktop shell, else null. */
 function getInvoke(): ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null {
@@ -50,6 +56,8 @@ async function bridge<T>(command: string, args: Record<string, unknown>, mock: (
 
 const mockDoc: {
   meta: WorkspaceMeta;
+  /** Canvas dimensions in workspace pixels (0 = no document loaded yet). */
+  canvas: { width: number; height: number };
   layers: Layer[];
   exportAreas: ExportArea[];
   /** Undo stack + cursor, mirroring `CommandEngine` (undoable commands only). */
@@ -57,6 +65,7 @@ const mockDoc: {
 } = {
   // Fresh, untitled workspace — the shell opens empty until a real document loads.
   history: { entries: [], currentIndex: null },
+  canvas: { width: 0, height: 0 },
   meta: {
     name: "Untitled.fleck",
     dirty: false,
@@ -67,6 +76,36 @@ const mockDoc: {
   layers: [],
   exportAreas: [],
 };
+
+/**
+ * Synthesize a representative render model from the mock canvas size. A real
+ * backend would composite this from actual layers/areas; here it gives the host
+ * something coherent to draw and navigate once a workspace is loaded.
+ */
+function buildRenderModel(): RenderModel {
+  const { width, height } = mockDoc.canvas;
+  if (width <= 0 || height <= 0) {
+    return { canvas: { width: 0, height: 0 }, layers: [], exportAreas: [], guides: [], selections: [] };
+  }
+  const inset: Rect = { x: width * 0.12, y: height * 0.16, width: width * 0.45, height: height * 0.5 };
+  const badge: Rect = { x: width * 0.66, y: height * 0.1, width: width * 0.26, height: width * 0.26 };
+  return {
+    canvas: { width, height },
+    layers: [
+      { id: "rl-base", rect: { x: 0, y: 0, width, height }, color: "#2b3b55", opacity: 1, visible: true },
+      { id: "rl-art", rect: inset, color: "#3a86ff", opacity: 0.9, visible: true },
+    ],
+    exportAreas: [
+      { id: "ea-frame", name: "frame", rect: { x: 0, y: 0, width, height } },
+      { id: "ea-icon", name: "icon", rect: badge },
+    ],
+    guides: [
+      { axis: "vertical", position: width / 2 },
+      { axis: "horizontal", position: height / 2 },
+    ],
+    selections: [{ id: "sel-1", rect: inset }],
+  };
+}
 
 let historyCounter = 0;
 
@@ -140,11 +179,12 @@ export const api = {
     return bridge("open_workspace", {}, () => {
       // Representative file that exercises both the version-warning and
       // missing-linked-asset paths so those dialogs are demonstrable.
+      mockDoc.canvas = { width: 1200, height: 630 };
       mockDoc.meta = {
         name: "marketing-assets.fleck",
         dirty: false,
-        layerCount: 0,
-        selectedCount: 0,
+        layerCount: 2,
+        selectedCount: 1,
         canvasSize: "1200 × 630 px",
       };
       return {
@@ -167,7 +207,8 @@ export const api = {
   openWorkspacePath(path: string): Promise<OpenWorkspaceResult | null> {
     return bridge("open_workspace_path", { path }, () => {
       const name = path.split(/[\\/]/).pop() ?? path;
-      mockDoc.meta = { name, dirty: false, layerCount: 0, selectedCount: 0, canvasSize: "0 × 0 px" };
+      mockDoc.canvas = { width: 512, height: 512 };
+      mockDoc.meta = { name, dirty: false, layerCount: 2, selectedCount: 0, canvasSize: "512 × 512 px" };
       return { path, name, warnings: [], missingAssets: [] } satisfies OpenWorkspaceResult;
     });
   },
@@ -205,7 +246,39 @@ export const api = {
 
   newWorkspace(): Promise<void> {
     return bridge("new_workspace", {}, () => {
+      mockDoc.canvas = { width: 0, height: 0 };
       mockDoc.meta = { name: "Untitled.fleck", dirty: false, layerCount: 0, selectedCount: 0, canvasSize: "0 × 0 px" };
+    });
+  },
+
+  // --- Viewport / rendering ---------------------------------------------------
+  // The camera (pan/zoom) lives on the frontend for responsive interaction;
+  // these commands cover the parts that need core-owned document bounds.
+
+  /**
+   * Read-only geometry for drawing the current frame, in workspace coordinates.
+   * Stands in for `fleck-render`'s composited frame; the host applies the
+   * viewport transform and paints it.
+   */
+  getRenderModel(): Promise<RenderModel> {
+    return bridge("get_render_model", {}, () => buildRenderModel());
+  },
+
+  /**
+   * Compute a target viewport for a focus action that needs document bounds
+   * (fit / zoom-to-selection / zoom-to-export-area). `actual` and `pixel-perfect`
+   * are handled on the frontend and don't call this.
+   */
+  getViewportFocus(kind: ViewportFocusKind, screen: Size): Promise<{ origin: Point; zoom: number } | null> {
+    return bridge("get_viewport_focus", { kind, screen }, () => {
+      const model = buildRenderModel();
+      let rect: Rect | null = null;
+      if (kind === "selection") rect = model.selections[0]?.rect ?? null;
+      else if (kind === "export-area") rect = model.exportAreas[0]?.rect ?? null;
+      else rect = model.canvas.width > 0 ? { x: 0, y: 0, width: model.canvas.width, height: model.canvas.height } : null;
+      if (!rect) return null;
+      const fitted = fitRect(rect, screen);
+      return { origin: fitted.origin, zoom: fitted.zoom };
     });
   },
 

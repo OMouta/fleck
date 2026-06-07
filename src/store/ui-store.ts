@@ -3,8 +3,9 @@
  *
  * Per `docs/architecture.md` and REQ-036, this store must never hold document
  * truth (layers, export areas, pixels). It only tracks ephemeral interaction
- * state: active tool, selection focus, panel visibility, and viewport view.
- * Document state lives in the Rust core and is read via TanStack Query.
+ * state: active tool, selection focus, and panel visibility. Camera/overlay
+ * (viewport) state lives in `viewport-store`. Document state lives in the Rust
+ * core and is read via TanStack Query.
  */
 import { create } from "zustand";
 
@@ -29,19 +30,7 @@ type UIState = {
   setSideTab: (tab: SideTab) => void;
   openExportAreaId: string | null;
   setOpenExportAreaId: (id: string | null) => void;
-
-  // Viewport view state (how the canvas is displayed, not what it contains)
-  zoom: number;
-  setZoom: (zoom: number) => void;
-  showGrid: boolean;
-  toggleGrid: () => void;
-  showRulers: boolean;
-  toggleRulers: () => void;
-  previewExport: boolean;
-  togglePreviewExport: () => void;
 };
-
-const clampZoom = (z: number) => Math.min(400, Math.max(25, z));
 
 export const useUIStore = create<UIState>((set) => ({
   activeTool: "move",
@@ -58,13 +47,4 @@ export const useUIStore = create<UIState>((set) => ({
   setSideTab: (tab) => set({ sideTab: tab }),
   openExportAreaId: null,
   setOpenExportAreaId: (id) => set({ openExportAreaId: id }),
-
-  zoom: 100,
-  setZoom: (zoom) => set({ zoom: clampZoom(zoom) }),
-  showGrid: true,
-  toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
-  showRulers: false,
-  toggleRulers: () => set((s) => ({ showRulers: !s.showRulers })),
-  previewExport: false,
-  togglePreviewExport: () => set((s) => ({ previewExport: !s.previewExport })),
 }));

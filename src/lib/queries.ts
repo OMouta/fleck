@@ -16,6 +16,7 @@ export const queryKeys = {
   recentFiles: ["workspace", "recent-files"] as const,
   commands: ["commands", "definitions"] as const,
   historyJumpSupported: ["commands", "history-jump-supported"] as const,
+  renderModel: ["document", "render-model"] as const,
 };
 
 export function useWorkspaceMeta() {
@@ -40,6 +41,10 @@ export function useRecentFiles() {
 
 export function useCommands() {
   return useQuery({ queryKey: queryKeys.commands, queryFn: api.getCommands, staleTime: Infinity });
+}
+
+export function useRenderModel() {
+  return useQuery({ queryKey: queryKeys.renderModel, queryFn: api.getRenderModel });
 }
 
 export function useHistoryJumpSupported() {

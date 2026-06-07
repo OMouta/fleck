@@ -32,6 +32,7 @@ function invalidateAfterCommand() {
   queryClient.invalidateQueries({ queryKey: queryKeys.workspaceMeta });
   queryClient.invalidateQueries({ queryKey: queryKeys.layers });
   queryClient.invalidateQueries({ queryKey: queryKeys.exportAreas });
+  queryClient.invalidateQueries({ queryKey: queryKeys.renderModel });
 }
 
 export const useCommandStore = create<CommandState>((set, get) => ({

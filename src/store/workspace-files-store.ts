@@ -42,6 +42,7 @@ function invalidateDocument() {
   queryClient.invalidateQueries({ queryKey: queryKeys.layers });
   queryClient.invalidateQueries({ queryKey: queryKeys.exportAreas });
   queryClient.invalidateQueries({ queryKey: queryKeys.history });
+  queryClient.invalidateQueries({ queryKey: queryKeys.renderModel });
 }
 
 export const useWorkspaceFilesStore = create<WorkspaceFilesState>((set, get) => ({
