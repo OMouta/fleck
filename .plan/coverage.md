@@ -193,3 +193,25 @@ Evidence:
 Known gaps:
 - The current layer render path is a Skia-backed preview of core layer bounds because the model does not yet carry decoded raster pixel buffers. Real image decoding and per-layer raster source binding remains for later asset/pixel-editing tasks.
 - Canvas event routing and frontend host integration remain with TASK-FE-004.
+
+### TASK-007
+
+Status: done
+
+Evidence:
+- Added `crates/fleck-core/src/layer.rs` with core raster-layer operations for create, delete, duplicate, rename, reorder, grouping, merge down, flatten visible layers, visibility, locking, opacity, blend mode, clipping, masks, rasterize, and trim-to-visible-pixels.
+- Registered undoable layer commands in `crates/fleck-core/src/command.rs`.
+- Added typed command parameter helpers for booleans, numbers, optional strings, and object IDs.
+- Added locked-layer protections for mutating layer operations while still allowing visibility and lock state changes.
+- Added layer merge and flatten operations that produce deterministic composite bounds.
+- Updated `crates/fleck-render/src/lib.rs` so hidden layers do not draw and layer blend modes map to Skia blend modes.
+- Added core tests for layer operations, locked-layer rejection, command undo/redo, and command registry exposure.
+- Added render tests for hidden layers and deterministic blend-mode output.
+- Verified `cargo test -p fleck-core`.
+- Verified `cargo test -p fleck-render`.
+- Verified `cargo fmt --all`.
+- Verified `cargo test --workspace`.
+
+Known gaps:
+- Raster layer operations currently operate on layer metadata and preview bounds. Real decoded pixel buffers, pixel-level trim, and destructive pixel compositing remain deferred to image import and pixel-editing tasks.
+- Frontend layer list, inspector controls, and context menus remain with TASK-FE-005.

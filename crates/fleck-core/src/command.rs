@@ -1,4 +1,8 @@
-use crate::model::{HistoryEntry, HistoryState, JsonValue, ObjectId, ValidationError, Workspace};
+use crate::layer::{self, LayerError, NewLayer};
+use crate::model::{
+    BlendMode, ClippingBehavior, HistoryEntry, HistoryState, JsonValue, ObjectId, Point, Rect,
+    ValidationError, Workspace,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{
@@ -58,6 +62,52 @@ impl CommandParameters {
                 expected: "non-empty string",
             }),
             None => Err(CommandError::MissingParameter { key }),
+        }
+    }
+
+    pub fn optional_string(&self, key: &'static str) -> Result<Option<&str>, CommandError> {
+        match self.get(key) {
+            Some(JsonValue::String(value)) if !value.trim().is_empty() => Ok(Some(value)),
+            Some(JsonValue::Null) | None => Ok(None),
+            Some(_) => Err(CommandError::InvalidParameter {
+                key,
+                expected: "non-empty string or null",
+            }),
+        }
+    }
+
+    pub fn required_bool(&self, key: &'static str) -> Result<bool, CommandError> {
+        match self.get(key) {
+            Some(JsonValue::Bool(value)) => Ok(*value),
+            Some(_) => Err(CommandError::InvalidParameter {
+                key,
+                expected: "boolean",
+            }),
+            None => Err(CommandError::MissingParameter { key }),
+        }
+    }
+
+    pub fn optional_f32(&self, key: &'static str, default: f32) -> Result<f32, CommandError> {
+        match self.get(key) {
+            Some(JsonValue::Number(value)) if value.is_finite() => Ok(*value as f32),
+            Some(JsonValue::Null) | None => Ok(default),
+            Some(_) => Err(CommandError::InvalidParameter {
+                key,
+                expected: "finite number",
+            }),
+        }
+    }
+
+    pub fn optional_usize(&self, key: &'static str) -> Result<Option<usize>, CommandError> {
+        match self.get(key) {
+            Some(JsonValue::Number(value)) if value.is_finite() && *value >= 0.0 => {
+                Ok(Some(*value as usize))
+            }
+            Some(JsonValue::Null) | None => Ok(None),
+            Some(_) => Err(CommandError::InvalidParameter {
+                key,
+                expected: "non-negative integer",
+            }),
         }
     }
 }
@@ -416,6 +466,7 @@ pub fn default_command_registry() -> Result<CommandRegistry, CommandError> {
             )))
         },
     )?;
+    register_layer_commands(&mut registry)?;
     Ok(registry)
 }
 
@@ -442,6 +493,470 @@ pub enum CommandError {
     NothingToRedo,
     #[error("command produced invalid workspace state")]
     Validation(#[from] ValidationError),
+    #[error("layer operation failed")]
+    Layer(#[from] LayerError),
+    #[error("invalid object id parameter `{key}`")]
+    InvalidObjectId {
+        key: &'static str,
+        issue: crate::model::ValidationIssue,
+    },
+}
+
+fn register_layer_commands(registry: &mut CommandRegistry) -> Result<(), CommandError> {
+    register_layer_command(
+        registry,
+        "layer.create",
+        "Create Layer",
+        "Create a raster layer.",
+        &["new layer", "add layer"],
+        None,
+        vec![
+            prompt("id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("name", "Name", ParameterKind::String, true),
+            prompt("x", "X", ParameterKind::Number, false),
+            prompt("y", "Y", ParameterKind::Number, false),
+            prompt("width", "Width", ParameterKind::Number, false),
+            prompt("height", "Height", ParameterKind::Number, false),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let name = invocation.parameters.required_string("name")?.to_owned();
+            let x = invocation.parameters.optional_f32("x", 0.0)?;
+            let y = invocation.parameters.optional_f32("y", 0.0)?;
+            let width = invocation.parameters.optional_f32("width", 64.0)?;
+            let height = invocation.parameters.optional_f32("height", 64.0)?;
+            layer::create_layer(
+                workspace,
+                NewLayer {
+                    id,
+                    name: name.clone(),
+                    position: Point { x, y },
+                    bounds: Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        width,
+                        height,
+                    },
+                },
+            )?;
+            Ok(CommandEffect::undoable(format!("Create Layer {name}")))
+        },
+    )?;
+    register_layer_command(
+        registry,
+        "layer.delete",
+        "Delete Layer",
+        "Delete an unlocked layer.",
+        &["remove layer"],
+        Some("Delete"),
+        vec![prompt("id", "Layer ID", ParameterKind::ObjectId, true)],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let deleted = layer::delete_layer(workspace, &id)?;
+            Ok(CommandEffect::undoable(format!(
+                "Delete Layer {}",
+                deleted.name
+            )))
+        },
+    )?;
+    register_layer_command(
+        registry,
+        "layer.duplicate",
+        "Duplicate Layer",
+        "Duplicate a layer above the source layer.",
+        &["copy layer"],
+        Some("Ctrl+D"),
+        vec![
+            prompt("id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("new_id", "New Layer ID", ParameterKind::ObjectId, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let new_id = required_object_id(&invocation.parameters, "new_id")?;
+            layer::duplicate_layer(workspace, &id, new_id)?;
+            Ok(CommandEffect::undoable("Duplicate Layer"))
+        },
+    )?;
+    register_layer_command(
+        registry,
+        "layer.rename",
+        "Rename Layer",
+        "Rename an unlocked layer.",
+        &["name layer"],
+        Some("F2"),
+        vec![
+            prompt("id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("name", "Name", ParameterKind::String, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let name = invocation.parameters.required_string("name")?.to_owned();
+            layer::rename_layer(workspace, &id, name.clone())?;
+            Ok(CommandEffect::undoable(format!("Rename Layer to {name}")))
+        },
+    )?;
+    register_layer_command(
+        registry,
+        "layer.reorder",
+        "Reorder Layer",
+        "Move an unlocked layer to a new stack index.",
+        &["move layer"],
+        None,
+        vec![
+            prompt("id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("index", "Index", ParameterKind::Number, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let index = invocation
+                .parameters
+                .optional_usize("index")?
+                .ok_or(CommandError::MissingParameter { key: "index" })?;
+            layer::reorder_layer(workspace, &id, index)?;
+            Ok(CommandEffect::undoable("Reorder Layer"))
+        },
+    )?;
+    register_bool_layer_command(
+        registry,
+        "layer.set_visible",
+        "Set Layer Visibility",
+        "Show or hide a layer.",
+        "visible",
+        |workspace, id, value| layer::set_visibility(workspace, &id, value),
+    )?;
+    register_bool_layer_command(
+        registry,
+        "layer.set_locked",
+        "Set Layer Lock",
+        "Lock or unlock a layer.",
+        "locked",
+        |workspace, id, value| layer::set_locked(workspace, &id, value),
+    )?;
+    register_layer_command(
+        registry,
+        "layer.set_opacity",
+        "Set Layer Opacity",
+        "Set layer opacity.",
+        &["opacity"],
+        None,
+        vec![
+            prompt("id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("opacity", "Opacity", ParameterKind::Number, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let opacity = invocation.parameters.optional_f32("opacity", 1.0)?;
+            layer::set_opacity(workspace, &id, opacity)?;
+            Ok(CommandEffect::undoable("Set Layer Opacity"))
+        },
+    )?;
+    register_layer_command(
+        registry,
+        "layer.set_blend_mode",
+        "Set Layer Blend Mode",
+        "Set layer blend mode.",
+        &["blend mode"],
+        None,
+        vec![
+            prompt("id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("blend_mode", "Blend Mode", ParameterKind::String, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let blend_mode =
+                parse_blend_mode(invocation.parameters.required_string("blend_mode")?)?;
+            layer::set_blend_mode(workspace, &id, blend_mode)?;
+            Ok(CommandEffect::undoable("Set Layer Blend Mode"))
+        },
+    )?;
+    register_layer_command(
+        registry,
+        "layer.set_clipping",
+        "Set Layer Clipping",
+        "Set layer clipping behavior.",
+        &["clipping"],
+        None,
+        vec![
+            prompt("id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("clipping", "Clipping", ParameterKind::String, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let clipping = parse_clipping(invocation.parameters.required_string("clipping")?)?;
+            layer::set_clipping(workspace, &id, clipping)?;
+            Ok(CommandEffect::undoable("Set Layer Clipping"))
+        },
+    )?;
+    register_layer_command(
+        registry,
+        "layer.set_mask",
+        "Set Layer Mask",
+        "Assign or clear a layer mask.",
+        &["mask layer"],
+        None,
+        vec![
+            prompt("id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt(
+                "mask_layer_id",
+                "Mask Layer ID",
+                ParameterKind::ObjectId,
+                false,
+            ),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let mask_layer_id = optional_object_id(&invocation.parameters, "mask_layer_id")?;
+            layer::set_mask(workspace, &id, mask_layer_id)?;
+            Ok(CommandEffect::undoable("Set Layer Mask"))
+        },
+    )?;
+    register_layer_command(
+        registry,
+        "layer.set_group",
+        "Set Layer Group",
+        "Assign or clear a layer group.",
+        &["group layer"],
+        None,
+        vec![
+            prompt("id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("group_id", "Group ID", ParameterKind::ObjectId, false),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let group_id = optional_object_id(&invocation.parameters, "group_id")?;
+            layer::set_layer_group(workspace, &id, group_id)?;
+            Ok(CommandEffect::undoable("Set Layer Group"))
+        },
+    )?;
+    register_layer_command(
+        registry,
+        "layer.group",
+        "Create Layer Group",
+        "Create a group from a layer.",
+        &["new group"],
+        None,
+        vec![
+            prompt("id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("group_id", "Group ID", ParameterKind::ObjectId, true),
+            prompt("name", "Name", ParameterKind::String, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let group_id = required_object_id(&invocation.parameters, "group_id")?;
+            let name = invocation.parameters.required_string("name")?.to_owned();
+            layer::create_group(workspace, group_id.clone(), name.clone(), vec![id.clone()])?;
+            layer::set_layer_group(workspace, &id, Some(group_id))?;
+            Ok(CommandEffect::undoable(format!(
+                "Create Layer Group {name}"
+            )))
+        },
+    )?;
+    register_simple_id_layer_command(
+        registry,
+        "layer.merge_down",
+        "Merge Layer Down",
+        "Merge an unlocked layer into the layer below.",
+        &["merge layer"],
+        |workspace, id| layer::merge_down(workspace, &id),
+    )?;
+    register_layer_command(
+        registry,
+        "layer.flatten",
+        "Flatten Visible Layers",
+        "Flatten visible unlocked layers into a single raster layer.",
+        &["flatten image"],
+        None,
+        vec![prompt(
+            "flattened_id",
+            "Flattened Layer ID",
+            ParameterKind::ObjectId,
+            true,
+        )],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let flattened_id = required_object_id(&invocation.parameters, "flattened_id")?;
+            layer::flatten_visible_layers(workspace, flattened_id)?;
+            Ok(CommandEffect::undoable("Flatten Visible Layers"))
+        },
+    )?;
+    register_simple_id_layer_command(
+        registry,
+        "layer.rasterize",
+        "Rasterize Layer",
+        "Rasterize an unlocked layer into layer pixels.",
+        &["raster layer"],
+        |workspace, id| layer::rasterize_layer(workspace, &id),
+    )?;
+    register_simple_id_layer_command(
+        registry,
+        "layer.trim_to_visible_pixels",
+        "Trim Layer To Visible Pixels",
+        "Trim layer bounds to visible pixels.",
+        &["trim layer"],
+        |workspace, id| layer::trim_to_visible_pixels(workspace, &id),
+    )?;
+    Ok(())
+}
+
+fn register_layer_command(
+    registry: &mut CommandRegistry,
+    id: &str,
+    label: &str,
+    description: &str,
+    aliases: &[&str],
+    shortcut: Option<&str>,
+    parameter_prompts: Vec<ParameterPrompt>,
+    handler: impl Fn(&mut Workspace, &CommandInvocation, &CommandRuntime) -> CommandResult
+        + Send
+        + Sync
+        + 'static,
+) -> Result<(), CommandError> {
+    registry.register(
+        CommandDefinition {
+            id: CommandId::new(id)?,
+            label: label.to_owned(),
+            description: description.to_owned(),
+            group: CommandGroup::Layer,
+            aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
+            shortcut: shortcut.map(str::to_owned),
+            undoable: true,
+            parameter_prompts,
+        },
+        handler,
+    )
+}
+
+fn register_bool_layer_command(
+    registry: &mut CommandRegistry,
+    id: &str,
+    label: &str,
+    description: &str,
+    value_key: &'static str,
+    operation: impl Fn(&mut Workspace, ObjectId, bool) -> layer::LayerResult<()> + Send + Sync + 'static,
+) -> Result<(), CommandError> {
+    let operation_label = label.to_owned();
+    register_layer_command(
+        registry,
+        id,
+        label,
+        description,
+        &[],
+        None,
+        vec![
+            prompt("id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt(value_key, "Value", ParameterKind::Boolean, true),
+        ],
+        move |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let value = invocation.parameters.required_bool(value_key)?;
+            operation(workspace, id, value)?;
+            Ok(CommandEffect::undoable(operation_label.clone()))
+        },
+    )
+}
+
+fn register_simple_id_layer_command(
+    registry: &mut CommandRegistry,
+    id: &str,
+    label: &str,
+    description: &str,
+    aliases: &[&str],
+    operation: impl Fn(&mut Workspace, ObjectId) -> layer::LayerResult<()> + Send + Sync + 'static,
+) -> Result<(), CommandError> {
+    let operation_label = label.to_owned();
+    register_layer_command(
+        registry,
+        id,
+        label,
+        description,
+        aliases,
+        None,
+        vec![prompt("id", "Layer ID", ParameterKind::ObjectId, true)],
+        move |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            operation(workspace, id)?;
+            Ok(CommandEffect::undoable(operation_label.clone()))
+        },
+    )
+}
+
+fn prompt(key: &str, label: &str, kind: ParameterKind, required: bool) -> ParameterPrompt {
+    ParameterPrompt {
+        key: key.to_owned(),
+        label: label.to_owned(),
+        kind,
+        required,
+    }
+}
+
+fn required_object_id(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<ObjectId, CommandError> {
+    let value = parameters.required_string(key)?;
+    ObjectId::new(value).map_err(|issue| CommandError::InvalidObjectId { key, issue })
+}
+
+fn optional_object_id(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<Option<ObjectId>, CommandError> {
+    parameters
+        .optional_string(key)?
+        .map(|value| {
+            ObjectId::new(value).map_err(|issue| CommandError::InvalidObjectId { key, issue })
+        })
+        .transpose()
+}
+
+fn parse_blend_mode(value: &str) -> Result<BlendMode, CommandError> {
+    match value {
+        "normal" => Ok(BlendMode::Normal),
+        "multiply" => Ok(BlendMode::Multiply),
+        "screen" => Ok(BlendMode::Screen),
+        "overlay" => Ok(BlendMode::Overlay),
+        "darken" => Ok(BlendMode::Darken),
+        "lighten" => Ok(BlendMode::Lighten),
+        "color_dodge" => Ok(BlendMode::ColorDodge),
+        "color_burn" => Ok(BlendMode::ColorBurn),
+        "hard_light" => Ok(BlendMode::HardLight),
+        "soft_light" => Ok(BlendMode::SoftLight),
+        "difference" => Ok(BlendMode::Difference),
+        "exclusion" => Ok(BlendMode::Exclusion),
+        "hue" => Ok(BlendMode::Hue),
+        "saturation" => Ok(BlendMode::Saturation),
+        "color" => Ok(BlendMode::Color),
+        "luminosity" => Ok(BlendMode::Luminosity),
+        _ => Err(CommandError::InvalidParameter {
+            key: "blend_mode",
+            expected: "known blend mode",
+        }),
+    }
+}
+
+fn parse_clipping(value: &str) -> Result<ClippingBehavior, CommandError> {
+    match value {
+        "none" => Ok(ClippingBehavior::None),
+        "clip_to_layer_below" => Ok(ClippingBehavior::ClipToLayerBelow),
+        "clip_to_group" => Ok(ClippingBehavior::ClipToGroup),
+        _ => Err(CommandError::InvalidParameter {
+            key: "clipping",
+            expected: "known clipping behavior",
+        }),
+    }
 }
 
 fn sync_history(workspace: &mut Workspace, entries: &[UndoEntry], current_index: Option<usize>) {
@@ -473,9 +988,17 @@ mod tests {
         let registry = default_command_registry().expect("registry");
         let definitions = registry.definitions().collect::<Vec<_>>();
 
-        assert_eq!(definitions.len(), 1);
-        assert_eq!(definitions[0].id.as_str(), "workspace.rename");
-        assert!(definitions[0].undoable);
+        assert!(definitions
+            .iter()
+            .any(|definition| definition.id.as_str() == "workspace.rename"));
+        assert!(definitions
+            .iter()
+            .any(|definition| definition.id.as_str() == "layer.create"
+                && definition.group == CommandGroup::Layer
+                && definition.undoable));
+        assert!(definitions
+            .iter()
+            .any(|definition| definition.id.as_str() == "layer.flatten"));
     }
 
     #[test]
@@ -600,6 +1123,109 @@ mod tests {
         );
     }
 
+    #[test]
+    fn layer_commands_are_undoable() {
+        let registry = default_command_registry().expect("registry");
+        let mut engine = CommandEngine::new();
+        let mut workspace = Workspace::empty(id("workspace"));
+
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "layer.create",
+                    vec![
+                        ("id", JsonValue::String("layer-a".to_owned())),
+                        ("name", JsonValue::String("Layer A".to_owned())),
+                        ("width", JsonValue::Number(32.0)),
+                        ("height", JsonValue::Number(16.0)),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("create layer");
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "layer.set_opacity",
+                    vec![
+                        ("id", JsonValue::String("layer-a".to_owned())),
+                        ("opacity", JsonValue::Number(0.5)),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("set opacity");
+
+        assert_eq!(workspace.layers.len(), 1);
+        assert_eq!(workspace.layers[0].opacity, 0.5);
+        assert_eq!(workspace.history.entries.len(), 2);
+
+        engine.undo(&mut workspace).expect("undo opacity");
+        assert_eq!(workspace.layers[0].opacity, 1.0);
+
+        engine.undo(&mut workspace).expect("undo create");
+        assert!(workspace.layers.is_empty());
+    }
+
+    #[test]
+    fn locked_layer_command_rejects_mutation() {
+        let registry = default_command_registry().expect("registry");
+        let mut engine = CommandEngine::new();
+        let mut workspace = Workspace::empty(id("workspace"));
+
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "layer.create",
+                    vec![
+                        ("id", JsonValue::String("locked".to_owned())),
+                        ("name", JsonValue::String("Locked".to_owned())),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("create layer");
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "layer.set_locked",
+                    vec![
+                        ("id", JsonValue::String("locked".to_owned())),
+                        ("locked", JsonValue::Bool(true)),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("lock layer");
+
+        let result = engine.execute(
+            &mut workspace,
+            &registry,
+            invocation(
+                "layer.rename",
+                vec![
+                    ("id", JsonValue::String("locked".to_owned())),
+                    ("name", JsonValue::String("Nope".to_owned())),
+                ],
+            ),
+            &CommandRuntime::default(),
+        );
+
+        assert!(matches!(
+            result,
+            Err(CommandError::Layer(LayerError::Locked { .. }))
+        ));
+        assert_eq!(workspace.layers[0].name, "Locked");
+    }
+
     fn rename_invocation(name: &str) -> CommandInvocation {
         CommandInvocation {
             id: CommandId::new("workspace.rename").expect("command id"),
@@ -607,6 +1233,18 @@ mod tests {
                 "name".to_owned(),
                 JsonValue::String(name.to_owned()),
             )]),
+            context: CommandContext::default(),
+        }
+    }
+
+    fn invocation(id: &str, values: Vec<(&str, JsonValue)>) -> CommandInvocation {
+        CommandInvocation {
+            id: CommandId::new(id).expect("command id"),
+            parameters: CommandParameters::new(
+                values
+                    .into_iter()
+                    .map(|(key, value)| (key.to_owned(), value)),
+            ),
             context: CommandContext::default(),
         }
     }

@@ -5,6 +5,7 @@
 
 pub mod command;
 pub mod geometry;
+pub mod layer;
 pub mod model;
 pub mod persistence;
 

@@ -4,11 +4,13 @@
 //! does not store, mutate, or become the owner of workspace truth.
 
 use fleck_core::geometry::{guide_lines, pixel_grid_for_rect, OverlaySettings, Viewport};
-use fleck_core::model::{Axis, CanvasBackground, Layer, Point, Rect, RgbaColor, Workspace};
+use fleck_core::model::{
+    Axis, BlendMode, CanvasBackground, Layer, Point, Rect, RgbaColor, Workspace,
+};
 use skia_safe::surfaces;
 use skia_safe::{
-    AlphaType, Canvas, Color, ColorType, IPoint, ImageInfo, Paint, PaintStyle, Rect as SkRect,
-    Surface,
+    AlphaType, BlendMode as SkBlendMode, Canvas, Color, ColorType, IPoint, ImageInfo, Paint,
+    PaintStyle, Rect as SkRect, Surface,
 };
 
 const CHECKERBOARD_CELL_SIZE: f32 = 16.0;
@@ -146,6 +148,7 @@ fn draw_layer_preview(canvas: &Canvas, viewport: &Viewport, layer: &Layer, index
         let mut paint = Paint::default();
         paint.set_anti_alias(false);
         paint.set_color(layer_preview_color(index, layer.opacity));
+        paint.set_blend_mode(blend_mode_to_skia(layer.blend_mode));
         canvas.draw_rect(rect, &paint);
     }
 }
@@ -321,6 +324,27 @@ fn layer_preview_color(index: usize, opacity: f32) -> Color {
     Color::from_argb(alpha, r, g, b)
 }
 
+fn blend_mode_to_skia(blend_mode: BlendMode) -> SkBlendMode {
+    match blend_mode {
+        BlendMode::Normal => SkBlendMode::SrcOver,
+        BlendMode::Multiply => SkBlendMode::Multiply,
+        BlendMode::Screen => SkBlendMode::Screen,
+        BlendMode::Overlay => SkBlendMode::Overlay,
+        BlendMode::Darken => SkBlendMode::Darken,
+        BlendMode::Lighten => SkBlendMode::Lighten,
+        BlendMode::ColorDodge => SkBlendMode::ColorDodge,
+        BlendMode::ColorBurn => SkBlendMode::ColorBurn,
+        BlendMode::HardLight => SkBlendMode::HardLight,
+        BlendMode::SoftLight => SkBlendMode::SoftLight,
+        BlendMode::Difference => SkBlendMode::Difference,
+        BlendMode::Exclusion => SkBlendMode::Exclusion,
+        BlendMode::Hue => SkBlendMode::Hue,
+        BlendMode::Saturation => SkBlendMode::Saturation,
+        BlendMode::Color => SkBlendMode::Color,
+        BlendMode::Luminosity => SkBlendMode::Luminosity,
+    }
+}
+
 fn read_surface_pixels(
     surface: &mut Surface,
     width: u32,
@@ -392,6 +416,37 @@ mod tests {
         let composited = pixel_at(&frame, 8, 8);
         assert!(composited[1] > composited[0]);
         assert_eq!(composited[3], 255);
+    }
+
+    #[test]
+    fn blend_modes_change_deterministic_output() {
+        let mut normal = workspace();
+        normal.layers.push(layer("base", 0.0, 0.0, 16.0, 16.0, 1.0));
+        normal.layers.push(layer("top", 0.0, 0.0, 16.0, 16.0, 1.0));
+
+        let mut multiply = normal.clone();
+        multiply.layers[1].blend_mode = BlendMode::Multiply;
+
+        let viewport = viewport(0.0, 0.0, 1.0, 24.0, 24.0);
+        let normal_frame = render_without_overlays(&normal, viewport);
+        let multiply_frame = render_without_overlays(&multiply, viewport);
+
+        assert_ne!(
+            pixel_at(&normal_frame, 8, 8),
+            pixel_at(&multiply_frame, 8, 8)
+        );
+    }
+
+    #[test]
+    fn hidden_layers_do_not_render() {
+        let mut workspace = workspace();
+        let mut hidden = layer("hidden", 0.0, 0.0, 16.0, 16.0, 1.0);
+        hidden.visible = false;
+        workspace.layers.push(hidden);
+
+        let frame = render_without_overlays(&workspace, viewport(0.0, 0.0, 1.0, 24.0, 24.0));
+
+        assert_eq!(pixel_at(&frame, 8, 8), [0, 0, 0, 0]);
     }
 
     #[test]

@@ -225,7 +225,7 @@ Acceptance criteria:
 
 ### TASK-007: Implement Raster Layers
 
-Status: open
+Status: done
 
 Requirements: REQ-006, REQ-016, REQ-027, REQ-049
 
