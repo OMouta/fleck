@@ -172,3 +172,24 @@ Evidence:
 
 Known gaps:
 - This task provides geometry and viewport math only. Skia rendering, canvas event routing, and visual overlay drawing remain with TASK-006 and TASK-FE-004.
+
+### TASK-006
+
+Status: done
+
+Evidence:
+- Added `SkiaViewportRenderer` in `crates/fleck-render/src/lib.rs`.
+- Added `RenderRequest`, `RenderedFrame`, `OverlaySummary`, and `RenderError` as the rendering boundary API.
+- Added Skia raster surface creation and RGBA pixel readback.
+- Added checkerboard transparency rendering.
+- Added deterministic layer preview drawing with layer visibility, opacity, viewport pan, and zoom.
+- Added overlay drawing hooks and reporting for export areas, guides, selections, transform handles, and pixel grid lines.
+- Added tests for checkerboard/layer pixels, alpha compositing, pan/zoom behavior, overlay counts, and non-mutating workspace access.
+- Added `skia-safe` and `thiserror` dependencies to `crates/fleck-render/Cargo.toml`.
+- Verified `cargo test -p fleck-render`.
+- Verified `cargo fmt --all`.
+- Verified `cargo test --workspace`.
+
+Known gaps:
+- The current layer render path is a Skia-backed preview of core layer bounds because the model does not yet carry decoded raster pixel buffers. Real image decoding and per-layer raster source binding remains for later asset/pixel-editing tasks.
+- Canvas event routing and frontend host integration remain with TASK-FE-004.

@@ -10,6 +10,8 @@ path = "src/lib.rs"
 
 [dependencies]
 fleck-core = { path = "../fleck-core" }
+skia-safe = { version = "0.97.2", features = ["binary-cache"] }
+thiserror = "2.0.18"
 
 [lints]
 workspace = true

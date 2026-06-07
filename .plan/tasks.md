@@ -181,7 +181,7 @@ Acceptance criteria:
 
 ### TASK-006: Implement Skia Rendering MVP
 
-Status: open
+Status: done
 
 Requirements: REQ-023, REQ-024, REQ-026, REQ-027, REQ-048
 
