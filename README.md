@@ -1,6 +1,13 @@
 <div align="center">
   <img src="./assets/fleck-icon.png" alt="Fleck Logo" width="200" />
   <h1>Fleck</h1>
+
+
+  <p>
+    <a href="https://github.com/OMouta/fleck/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/OMouta/fleck/actions/workflows/ci.yml/badge.svg" /></a>
+    <img alt="Issues" src="https://img.shields.io/github/issues/OMouta/fleck" />
+    <img alt="Pull Requests" src="https://img.shields.io/github/issues-pr/OMouta/fleck" />
+  </p>
 </div>
 
 Fleck is an open-source, cross-platform raster image editor.
