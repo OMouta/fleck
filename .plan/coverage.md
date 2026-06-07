@@ -153,3 +153,22 @@ Evidence:
 
 Known gaps:
 - Only infrastructure and one minimal workspace command are included. Real layer, selection, export, and pixel-editing commands remain with their linked implementation tasks.
+
+### TASK-005
+
+Status: done
+
+Evidence:
+- Added workspace geometry and viewport core in `crates/fleck-core/src/geometry.rs`.
+- Added `Viewport` with workspace/screen coordinate conversion, pan-by-screen-delta, zoom-around-anchor, and visible workspace rect calculation.
+- Added `LayerTransform` with local-to-workspace and workspace-to-local conversion, including scale and rotation.
+- Added snapping settings and snapping helpers for pixels, layer bounds, export area bounds, centers, edges, guides, and common sizes.
+- Added guide line extraction.
+- Added pixel-grid visibility rules and integer pixel-boundary grid generation.
+- Added overlay settings for checkerboard, guides, pixel grid, selections, transform handles, and export areas.
+- Added tests for viewport conversion, zoom anchor stability, layer transform round-trip, snapping targets, common-size snapping, and pixel-grid visibility/alignment.
+- Verified `cargo fmt --all`.
+- Verified `cargo test --workspace`.
+
+Known gaps:
+- This task provides geometry and viewport math only. Skia rendering, canvas event routing, and visual overlay drawing remain with TASK-006 and TASK-FE-004.

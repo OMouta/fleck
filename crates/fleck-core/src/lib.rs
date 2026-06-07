@@ -4,6 +4,7 @@
 //! layers must access document behavior through explicit core APIs.
 
 pub mod command;
+pub mod geometry;
 pub mod model;
 pub mod persistence;
 

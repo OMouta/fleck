@@ -159,7 +159,7 @@ Acceptance criteria:
 
 ### TASK-005: Implement Workspace Geometry And Viewport Core
 
-Status: open
+Status: done
 
 Requirements: REQ-005, REQ-023, REQ-024, REQ-025, REQ-026, REQ-027
 
