@@ -3,6 +3,7 @@
 //! This crate owns authoritative document state. React, Tauri, and rendering
 //! layers must access document behavior through explicit core APIs.
 
+pub mod command;
 pub mod model;
 pub mod persistence;
 

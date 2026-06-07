@@ -135,3 +135,21 @@ Evidence:
 
 Known gaps:
 - The `.fleck` package is currently an inspectable JSON envelope. A compressed/archive container can be introduced later if the project records that decision.
+
+### TASK-004
+
+Status: done
+
+Evidence:
+- Added core command infrastructure in `crates/fleck-core/src/command.rs`.
+- Added `CommandRegistry`, `CommandDefinition`, command groups, aliases, shortcuts, parameter prompts, typed command parameters, and command context.
+- Added `CommandEngine` with snapshot-backed undo/redo and redo truncation after new edits.
+- Added workspace history synchronization with operation labels exposed through `Workspace.history`.
+- Added `CommandRuntime`, `CancellationToken`, `ProgressSink`, and `CommandProgress` for long-running command plumbing.
+- Added a concrete `workspace.rename` command to verify command invocation, typed parameters, validation, history labels, and undo/redo behavior.
+- Added tests for registry listing, execution/history update, undo/redo restoration, redo truncation, cancellation, and progress reporting.
+- Verified `cargo fmt --all`.
+- Verified `cargo test --workspace`.
+
+Known gaps:
+- Only infrastructure and one minimal workspace command are included. Real layer, selection, export, and pixel-editing commands remain with their linked implementation tasks.

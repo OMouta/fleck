@@ -114,7 +114,7 @@ Acceptance criteria:
 
 ### TASK-004: Implement Command Registry And Undo/Redo
 
-Status: open
+Status: done
 
 Requirements: REQ-004, REQ-006, REQ-008, REQ-011, REQ-016, REQ-035, REQ-042, REQ-044, REQ-048
 
