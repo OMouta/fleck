@@ -112,17 +112,54 @@ export type RecentFile = {
   openedAt: string;
 };
 
-export type HistoryEntry = {
-  id: string;
+/**
+ * Command + history types mirror the Rust `fleck-core::command` contract so the
+ * palette and history panel consume the real registry/engine shape.
+ */
+export type CommandGroup =
+  | "workspace"
+  | "layer"
+  | "selection"
+  | "export"
+  | "recipe"
+  | "view"
+  | "tool";
+
+export type ParameterKind = "string" | "number" | "boolean" | "object_id";
+
+export type ParameterPrompt = {
+  key: string;
   label: string;
-  /** Index of the currently active state; entries after it are redoable. */
-  current: boolean;
+  kind: ParameterKind;
+  required: boolean;
 };
 
-export type CommandItem = {
+export type CommandDefinition = {
   id: string;
-  name: string;
-  group: "Workspace" | "Export" | "Edit" | "View" | "Recipe";
+  label: string;
+  description: string;
+  group: CommandGroup;
+  aliases: string[];
   shortcut?: string;
-  icon: LucideIcon;
+  undoable: boolean;
+  parameterPrompts: ParameterPrompt[];
+};
+
+/** Result of executing a command (mirrors `CommandExecution`). */
+export type CommandExecution = {
+  commandId: string;
+  operationLabel: string;
+};
+
+export type HistoryEntry = {
+  id: string;
+  commandId: string;
+  label: string;
+};
+
+/** Mirrors `fleck-core::model::HistoryState`. */
+export type HistoryState = {
+  entries: HistoryEntry[];
+  /** Index of the currently active state; null means before the first entry. */
+  currentIndex: number | null;
 };

@@ -14,6 +14,8 @@ export const queryKeys = {
   exportAreas: ["document", "export-areas"] as const,
   history: ["document", "history"] as const,
   recentFiles: ["workspace", "recent-files"] as const,
+  commands: ["commands", "definitions"] as const,
+  historyJumpSupported: ["commands", "history-jump-supported"] as const,
 };
 
 export function useWorkspaceMeta() {
@@ -36,6 +38,18 @@ export function useRecentFiles() {
   return useQuery({ queryKey: queryKeys.recentFiles, queryFn: api.getRecentFiles });
 }
 
+export function useCommands() {
+  return useQuery({ queryKey: queryKeys.commands, queryFn: api.getCommands, staleTime: Infinity });
+}
+
+export function useHistoryJumpSupported() {
+  return useQuery({
+    queryKey: queryKeys.historyJumpSupported,
+    queryFn: api.supportsHistoryJump,
+    staleTime: Infinity,
+  });
+}
+
 export function useToggleLayerVisibility() {
   const qc = useQueryClient();
   return useMutation({
@@ -49,13 +63,5 @@ export function useToggleLayerLocked() {
   return useMutation({
     mutationFn: ({ id, locked }: { id: string; locked: boolean }) => api.setLayerLocked(id, locked),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.layers }),
-  });
-}
-
-export function useSaveWorkspace() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => api.saveWorkspace(),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.workspaceMeta }),
   });
 }

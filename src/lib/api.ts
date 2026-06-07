@@ -10,13 +10,17 @@
  * See `docs/architecture.md`: Rust owns document truth, React owns UI.
  */
 import type {
+  CommandDefinition,
+  CommandExecution,
   ExportArea,
   HistoryEntry,
+  HistoryState,
   Layer,
   OpenWorkspaceResult,
   RecentFile,
   WorkspaceMeta,
 } from "./fleck-data";
+import { COMMAND_DEFINITIONS } from "./command-registry";
 
 /** Returns the Tauri `invoke` if running inside the desktop shell, else null. */
 function getInvoke(): ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null {
@@ -48,10 +52,11 @@ const mockDoc: {
   meta: WorkspaceMeta;
   layers: Layer[];
   exportAreas: ExportArea[];
-  history: HistoryEntry[];
+  /** Undo stack + cursor, mirroring `CommandEngine` (undoable commands only). */
+  history: { entries: HistoryEntry[]; currentIndex: number | null };
 } = {
   // Fresh, untitled workspace — the shell opens empty until a real document loads.
-  history: [{ id: "h1", label: "New workspace", current: true }],
+  history: { entries: [], currentIndex: null },
   meta: {
     name: "Untitled.fleck",
     dirty: false,
@@ -62,6 +67,17 @@ const mockDoc: {
   layers: [],
   exportAreas: [],
 };
+
+let historyCounter = 0;
+
+/** Push an undoable operation onto the mock undo stack (truncating any redo tail). */
+function pushHistory(commandId: string, label: string) {
+  const cut = mockDoc.history.currentIndex === null ? 0 : mockDoc.history.currentIndex + 1;
+  mockDoc.history.entries = mockDoc.history.entries.slice(0, cut);
+  mockDoc.history.entries.push({ id: `history-${historyCounter++}`, commandId, label });
+  mockDoc.history.currentIndex = mockDoc.history.entries.length - 1;
+  mockDoc.meta = { ...mockDoc.meta, dirty: true };
+}
 
 // --- Queries (read document state) -------------------------------------------
 
@@ -80,8 +96,16 @@ export const api = {
     );
   },
 
-  getHistory(): Promise<HistoryEntry[]> {
-    return bridge("get_history", {}, () => mockDoc.history.map((h) => ({ ...h })));
+  getHistory(): Promise<HistoryState> {
+    return bridge("get_history", {}, () => ({
+      entries: mockDoc.history.entries.map((h) => ({ ...h })),
+      currentIndex: mockDoc.history.currentIndex,
+    }));
+  },
+
+  /** The command registry definitions (mirrors `CommandRegistry::definitions`). */
+  getCommands(): Promise<CommandDefinition[]> {
+    return bridge("get_commands", {}, () => COMMAND_DEFINITIONS.map((c) => ({ ...c })));
   },
 
   // --- Mutations (request document changes) ----------------------------------
@@ -197,16 +221,63 @@ export const api = {
     return bridge("export_all", {}, () => undefined);
   },
 
-  undo(): Promise<void> {
-    return bridge("undo", {}, () => undefined);
+  // --- Command engine ---------------------------------------------------------
+
+  /**
+   * Execute a registered command by id, optionally with collected parameters.
+   * Undoable commands append to history (mirrors `CommandEngine::execute`).
+   */
+  runCommand(commandId: string, parameters: Record<string, unknown> = {}): Promise<CommandExecution> {
+    return bridge("run_command", { commandId, parameters }, () => {
+      const def = COMMAND_DEFINITIONS.find((c) => c.id === commandId);
+      const label = operationLabel(def?.label ?? commandId, parameters);
+      if (def?.undoable) pushHistory(commandId, label);
+      return { commandId, operationLabel: label } satisfies CommandExecution;
+    });
   },
 
-  redo(): Promise<void> {
-    return bridge("redo", {}, () => undefined);
+  undo(): Promise<CommandExecution | null> {
+    return bridge("undo", {}, () => {
+      const { entries, currentIndex } = mockDoc.history;
+      if (currentIndex === null) return null;
+      const entry = entries[currentIndex];
+      mockDoc.history.currentIndex = currentIndex === 0 ? null : currentIndex - 1;
+      return { commandId: entry.commandId, operationLabel: `Undo ${entry.label}` };
+    });
   },
 
-  /** Generic command-palette dispatch. */
-  runCommand(commandId: string): Promise<void> {
-    return bridge("run_command", { commandId }, () => undefined);
+  redo(): Promise<CommandExecution | null> {
+    return bridge("redo", {}, () => {
+      const { entries, currentIndex } = mockDoc.history;
+      const next = currentIndex === null ? 0 : currentIndex + 1;
+      const entry = entries[next];
+      if (!entry) return null;
+      mockDoc.history.currentIndex = next;
+      return { commandId: entry.commandId, operationLabel: `Redo ${entry.label}` };
+    });
+  },
+
+  /**
+   * Jump to an arbitrary history state. Supported here by stepping the cursor;
+   * `index` of -1 means "before the first entry". Backends that can't jump
+   * should omit this command — the UI hides the affordance when unsupported.
+   */
+  jumpToHistory(index: number): Promise<void> {
+    return bridge("jump_to_history", { index }, () => {
+      const max = mockDoc.history.entries.length - 1;
+      mockDoc.history.currentIndex = index < 0 ? null : Math.min(index, max);
+    });
+  },
+
+  /** Whether the backend supports jump-to-state (vs. stepwise undo/redo only). */
+  supportsHistoryJump(): Promise<boolean> {
+    return bridge("supports_history_jump", {}, () => true);
   },
 };
+
+/** Render an operation label, interpolating a `name` parameter when present. */
+function operationLabel(base: string, parameters: Record<string, unknown>): string {
+  const name = parameters.name;
+  if (typeof name === "string" && name.trim()) return `${base} → ${name}`;
+  return base;
+}

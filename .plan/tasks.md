@@ -137,7 +137,7 @@ Acceptance criteria:
 
 ### TASK-FE-003: Build Command Palette And History Panel
 
-Status: open
+Status: done
 
 Requirements: REQ-042, REQ-044, REQ-045, REQ-052
 

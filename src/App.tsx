@@ -9,6 +9,7 @@ import { WorkspaceDialogs } from "@/components/fleck/workspace-dialogs";
 import { TOOLS } from "@/lib/fleck-data";
 import { useUIStore } from "@/store/ui-store";
 import { useWorkspaceFilesStore } from "@/store/workspace-files-store";
+import { useCommandStore } from "@/store/command-store";
 
 function App() {
   const paletteOpen = useUIStore((s) => s.paletteOpen);
@@ -25,9 +26,10 @@ function App() {
         return;
       }
 
-      // File shortcuts (routed through the workspace-file store, same as the menu)
+      // Modifier shortcuts: file ops + the command engine (undo/redo/repeat).
       if (mod) {
         const files = useWorkspaceFilesStore.getState();
+        const commands = useCommandStore.getState();
         const key = e.key.toLowerCase();
         if (key === "o") {
           e.preventDefault();
@@ -43,6 +45,22 @@ function App() {
         if (key === "n" && !e.shiftKey) {
           e.preventDefault();
           files.newWorkspace();
+          return;
+        }
+        if (key === "z") {
+          e.preventDefault();
+          if (e.shiftKey) commands.redo();
+          else commands.undo();
+          return;
+        }
+        if (key === "y") {
+          e.preventDefault();
+          commands.redo();
+          return;
+        }
+        if (key === ".") {
+          e.preventDefault();
+          commands.repeatLast();
           return;
         }
         return; // leave other modifier combos alone

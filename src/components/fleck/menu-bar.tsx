@@ -1,8 +1,9 @@
 import { Command, Save, Share2, Download, Undo2, Redo2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { useWorkspaceMeta } from "@/lib/queries";
+import { useHistory, useWorkspaceMeta } from "@/lib/queries";
 import { useUIStore } from "@/store/ui-store";
 import { useWorkspaceFilesStore } from "@/store/workspace-files-store";
+import { useCommandStore } from "@/store/command-store";
 import { FileMenu } from "@/components/fleck/file-menu";
 import { WindowControls } from "@/components/fleck/window-controls";
 
@@ -26,7 +27,15 @@ function FleckMark() {
 export function MenuBar() {
   const setPaletteOpen = useUIStore((s) => s.setPaletteOpen);
   const { data: meta } = useWorkspaceMeta();
+  const { data: history } = useHistory();
   const save = useWorkspaceFilesStore((s) => s.save);
+  const undo = useCommandStore((s) => s.undo);
+  const redo = useCommandStore((s) => s.redo);
+
+  const entries = history?.entries ?? [];
+  const currentIndex = history?.currentIndex ?? null;
+  const canUndo = currentIndex !== null;
+  const canRedo = entries.length > 0 && (currentIndex === null ? true : currentIndex < entries.length - 1);
 
   return (
     <header
@@ -61,10 +70,10 @@ export function MenuBar() {
 
       <div className="flex items-center gap-1.5">
         <div className="mr-1 hidden items-center gap-0.5 sm:flex">
-          <IconButton label="Undo" shortcut="⌘Z" onClick={() => api.undo()}>
+          <IconButton label="Undo" shortcut="⌘Z" onClick={() => undo()} disabled={!canUndo}>
             <Undo2 className="size-4" />
           </IconButton>
-          <IconButton label="Redo" shortcut="⌘⇧Z" onClick={() => api.redo()}>
+          <IconButton label="Redo" shortcut="⌘⇧Z" onClick={() => redo()} disabled={!canRedo}>
             <Redo2 className="size-4" />
           </IconButton>
         </div>
@@ -106,18 +115,21 @@ function IconButton({
   label,
   shortcut,
   onClick,
+  disabled = false,
 }: {
   children: React.ReactNode;
   label: string;
   shortcut?: string;
   onClick?: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       title={shortcut ? `${label} · ${shortcut}` : label}
       aria-label={label}
-      className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+      className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
     >
       {children}
     </button>

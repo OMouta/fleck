@@ -17,17 +17,19 @@ import {
   Undo2,
   Redo2,
 } from "lucide-react";
-import type { ExportArea, HistoryEntry, Layer } from "@/lib/fleck-data";
+import type { ExportArea, Layer } from "@/lib/fleck-data";
 import { api } from "@/lib/api";
 import {
   useExportAreas,
   useHistory,
+  useHistoryJumpSupported,
   useLayers,
   useToggleLayerLocked,
   useToggleLayerVisibility,
 } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { useUIStore, type SideTab } from "@/store/ui-store";
+import { useCommandStore } from "@/store/command-store";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const KIND_ICON = {
@@ -316,21 +318,32 @@ function StatusDot({ status }: { status: ExportArea["status"] }) {
 }
 
 function HistoryPanel() {
-  const { data: entries = [], isLoading } = useHistory();
+  const { data: history, isLoading } = useHistory();
+  const { data: jumpSupported = false } = useHistoryJumpSupported();
+  const undo = useCommandStore((s) => s.undo);
+  const redo = useCommandStore((s) => s.redo);
+  const jumpTo = useCommandStore((s) => s.jumpTo);
+
+  const entries = history?.entries ?? [];
+  const currentIndex = history?.currentIndex ?? null;
+  const canUndo = currentIndex !== null;
+  const canRedo = entries.length > 0 && (currentIndex === null ? true : currentIndex < entries.length - 1);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden" aria-label="History">
       <div className="flex items-center gap-1 border-b border-border p-1.5">
         <button
-          onClick={() => api.undo()}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          onClick={() => undo()}
+          disabled={!canUndo}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
         >
           <Undo2 className="size-3.5" />
           Undo
         </button>
         <button
-          onClick={() => api.redo()}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          onClick={() => redo()}
+          disabled={!canRedo}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
         >
           <Redo2 className="size-3.5" />
           Redo
@@ -338,28 +351,74 @@ function HistoryPanel() {
       </div>
       <ol className="flex-1 overflow-y-auto p-1.5">
         {isLoading && <li className="px-2 py-1.5 text-[13px] text-muted-foreground">Loading history…</li>}
-        {entries.map((entry) => (
-          <HistoryRow key={entry.id} entry={entry} />
-        ))}
+        {!isLoading && entries.length === 0 && (
+          <li className="px-3 py-6 text-center text-[13px] text-muted-foreground">
+            No history yet. Edits you make will appear here.
+          </li>
+        )}
+        {entries.map((entry, index) => {
+          const isCurrent = currentIndex === index;
+          const isFuture = currentIndex === null ? true : index > currentIndex;
+          return (
+            <HistoryRow
+              key={entry.id}
+              label={entry.label}
+              isCurrent={isCurrent}
+              isFuture={isFuture}
+              canJump={jumpSupported}
+              onJump={() => jumpTo(index)}
+            />
+          );
+        })}
       </ol>
     </div>
   );
 }
 
-function HistoryRow({ entry }: { entry: HistoryEntry }) {
-  return (
-    <li
-      className={cn(
-        "flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px]",
-        entry.current ? "bg-primary/12 text-foreground ring-1 ring-primary/30" : "text-muted-foreground",
-      )}
-    >
+function HistoryRow({
+  label,
+  isCurrent,
+  isFuture,
+  canJump,
+  onJump,
+}: {
+  label: string;
+  isCurrent: boolean;
+  isFuture: boolean;
+  canJump: boolean;
+  onJump: () => void;
+}) {
+  const content = (
+    <>
       <span
-        className={cn("size-1.5 shrink-0 rounded-full", entry.current ? "bg-primary" : "bg-border")}
+        className={cn("size-1.5 shrink-0 rounded-full", isCurrent ? "bg-primary" : "bg-border")}
         aria-hidden="true"
       />
-      <span className="flex-1 truncate">{entry.label}</span>
-      {entry.current && <span className="font-mono text-[10px] text-primary">current</span>}
+      <span className="flex-1 truncate">{label}</span>
+      {isCurrent && <span className="font-mono text-[10px] text-primary">current</span>}
+    </>
+  );
+
+  const className = cn(
+    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors",
+    isCurrent ? "bg-primary/12 text-foreground ring-1 ring-primary/30" : "text-muted-foreground",
+    isFuture && !isCurrent && "opacity-50",
+  );
+
+  // Jump-to-state is only offered when the backend supports it; otherwise the
+  // row is static and users undo/redo stepwise.
+  if (!canJump) {
+    return <li className={className}>{content}</li>;
+  }
+  return (
+    <li>
+      <button
+        onClick={onJump}
+        title={isFuture ? "Redo to this state" : "Jump to this state"}
+        className={cn(className, "hover:bg-secondary/70")}
+      >
+        {content}
+      </button>
     </li>
   );
 }
