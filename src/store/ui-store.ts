@@ -9,7 +9,7 @@
  */
 import { create } from "zustand";
 
-export type SideTab = "layers" | "exports";
+export type SideTab = "layers" | "exports" | "history";
 
 type UIState = {
   // Active tool selection

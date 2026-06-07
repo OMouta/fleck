@@ -10,6 +10,8 @@ import { create } from "zustand";
 import { api } from "@/lib/api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/lib/queries";
+import { LAYER_COMMAND_IDS, resolveLayerParams } from "@/lib/layer-commands";
+import { useUIStore } from "@/store/ui-store";
 
 const RECENT_LIMIT = 6;
 
@@ -40,7 +42,21 @@ export const useCommandStore = create<CommandState>((set, get) => ({
   lastInvocation: null,
 
   execute: async (id, parameters = {}) => {
-    await api.runCommand(id, parameters);
+    // Layer commands need core object IDs generated and the target defaulted to
+    // the current selection before they reach the engine (see layer-commands).
+    let runParams = parameters;
+    let createdLayerId: string | null = null;
+    if (LAYER_COMMAND_IDS.has(id)) {
+      const resolved = resolveLayerParams(id, parameters, useUIStore.getState().selectedLayerId);
+      runParams = resolved.parameters;
+      createdLayerId = resolved.createdId;
+    }
+
+    await api.runCommand(id, runParams);
+
+    // Keep focus on whatever the command just created so the inspector follows.
+    if (createdLayerId) useUIStore.getState().setSelectedLayerId(createdLayerId);
+
     set((s) => ({
       lastInvocation: { id, parameters },
       recentCommandIds: [id, ...s.recentCommandIds.filter((c) => c !== id)].slice(0, RECENT_LIMIT),

@@ -237,3 +237,28 @@ Evidence:
 Known gaps:
 - Clipboard and drag/drop byte acquisition remain frontend/Tauri responsibilities in TASK-FE-006; TASK-008 provides command/API hooks for those flows.
 - Rasterization currently creates an editable layer with correct object-derived bounds and linkage, but destructive pixel-buffer transfer remains deferred to later pixel-editing/export work.
+
+### TASK-FE-005
+
+Status: done
+
+Evidence:
+- Rebuilt the layers panel and inspector in `src/components/fleck/side-panel.tsx`: layer rows with visibility/lock toggles, selection, inline rename (double-click / F2 / inspector field), HTML5 drag-to-reorder with a drop indicator, per-row right-click context menus, and an inspector with an editable name, opacity slider (live preview, single undoable commit on release), full blend-mode dropdown, and duplicate/merge-down/delete actions.
+- Added `src/components/ui/context-menu.tsx` (Radix `@radix-ui/react-context-menu`, added to `package.json`) mirroring the existing dropdown-menu styling.
+- Added `src/lib/layer-commands.ts` to map UI actions to the exact core `layer.*` commands, generate the object IDs the core requires (`create`/`duplicate`/`group`/`flatten`), default the target to the current selection, and list blend modes.
+- Routed every layer mutation through the command engine in `src/store/command-store.ts` (resolves layer params, auto-selects created layers) so all edits are undoable and appear in the history panel.
+- Aligned `src/lib/command-registry.ts` palette entries to real core IDs (`layer.create/duplicate/rename/delete/merge_down/flatten/group`), replacing the prior placeholder IDs.
+- Extended the mock backend in `src/lib/api.ts` to apply `layer.*` commands to the mock document and record history, seeded representative layers on workspace open, and removed the now-unused direct visibility/lock setters (also removed their hooks from `src/lib/queries.ts`).
+- Widened `BlendMode` in `src/lib/fleck-data.ts` to the full core set and added the missing `history` value to `SideTab` in `src/store/ui-store.ts`.
+- Accessibility: aria-labels/aria-pressed/aria-current on row controls, screen-reader hidden/locked status text, locked layers shown in the warning color with an inspector "Locked" badge, destructive/reorder actions disabled on locked layers, and keyboard-accessible reorder via the context menu (drag is mouse-only).
+- Verified `npm run build` (tsc typecheck + vite build) passes.
+
+Coverage impact:
+- REQ-039: layer inspector controls implemented (covered for the layer surface; other object inspectors remain with their own TASK-FE-* items).
+- REQ-040: list, visibility, locks, drag reorder, opacity, blend mode, add/delete/duplicate/merge/flatten/rename implemented. Grouping is wired to `layer.group` but rendered flat — hierarchical nesting deferred per DEC-FE-005-group-nesting, so REQ-040 stays partial.
+- REQ-042: layer operations produce named, undoable history entries surfaced in the history panel.
+- REQ-052: keyboard operability, accessible labels, and clear locked/hidden state for the layers panel; broader accessibility audit remains TASK-FE-018.
+
+Known gaps:
+- The dev mock does not snapshot-revert document state on undo (pre-existing mock limitation; the real Rust engine restores via snapshots). Forward layer operations and history labels are fully exercised.
+- Hierarchical group rendering is deferred (DEC-FE-005-group-nesting).

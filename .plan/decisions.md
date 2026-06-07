@@ -26,7 +26,10 @@ Source: `.plan/spec.md`
 
 ## Deferrals
 
-None yet.
+- DEC-FE-005-group-nesting: TASK-FE-005 wires the layer "Group" action to the core `layer.group` command (undoable, in history), but the layers panel renders groups as a flat header row rather than a collapsible nested tree.
+  - Affected requirement: REQ-040 (grouping).
+  - Reason: the frontend `Layer` DTO (`src/lib/fleck-data.ts`) is a flat list with no parent/child or expansion fields, so hierarchy cannot be rendered yet. The core model carries group membership, but `get_layers` does not project it.
+  - Resolution path: extend the layer DTO with group/parent + collapsed state when the real `get_layers` bridge lands (TASK-020 territory), then render indentation/collapse. Tracked as partial coverage for REQ-040.
 
 ## Environment Gaps
 

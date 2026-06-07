@@ -5,7 +5,7 @@
  * through the mutations below, which invalidate the relevant queries. No document
  * array is ever held as React-owned state.
  */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 
 export const queryKeys = {
@@ -52,21 +52,5 @@ export function useHistoryJumpSupported() {
     queryKey: queryKeys.historyJumpSupported,
     queryFn: api.supportsHistoryJump,
     staleTime: Infinity,
-  });
-}
-
-export function useToggleLayerVisibility() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, visible }: { id: string; visible: boolean }) => api.setLayerVisibility(id, visible),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.layers }),
-  });
-}
-
-export function useToggleLayerLocked() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, locked }: { id: string; locked: boolean }) => api.setLayerLocked(id, locked),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.layers }),
   });
 }

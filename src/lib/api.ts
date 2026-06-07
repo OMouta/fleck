@@ -26,6 +26,7 @@ import type {
   WorkspaceMeta,
 } from "./fleck-data";
 import { COMMAND_DEFINITIONS } from "./command-registry";
+import { BLEND_MODES } from "./layer-commands";
 import { fitRect } from "./viewport";
 
 /** Returns the Tauri `invoke` if running inside the desktop shell, else null. */
@@ -118,6 +119,131 @@ function pushHistory(commandId: string, label: string) {
   mockDoc.meta = { ...mockDoc.meta, dirty: true };
 }
 
+// --- Mock layer operations ---------------------------------------------------
+// Apply `layer.*` core commands to the mock document so the layers panel,
+// inspector, and history behave end-to-end in a browser dev session. The real
+// backend performs these in the Rust core; the resolved parameter shapes here
+// match `fleck-core::command`'s `layer.*` commands exactly.
+
+/** Human labels for layer history entries (mirrors core `CommandEffect` labels). */
+const LAYER_OP_LABELS: Record<string, string> = {
+  "layer.create": "Add Layer",
+  "layer.duplicate": "Duplicate Layer",
+  "layer.delete": "Delete Layer",
+  "layer.rename": "Rename Layer",
+  "layer.reorder": "Reorder Layer",
+  "layer.set_visible": "Set Layer Visibility",
+  "layer.set_locked": "Set Layer Lock",
+  "layer.set_opacity": "Set Layer Opacity",
+  "layer.set_blend_mode": "Set Layer Blend Mode",
+  "layer.merge_down": "Merge Layer Down",
+  "layer.flatten": "Flatten Visible Layers",
+  "layer.group": "Create Layer Group",
+};
+
+const clamp01 = (n: number) => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0);
+
+/** Map a snake_case `layer.set_blend_mode` param back to a `Layer.blend` label. */
+function blendLabel(value: string): Layer["blend"] {
+  return BLEND_MODES.find((m) => m.value === value)?.label ?? "Normal";
+}
+
+function newMockLayer(id: string, name: string, kind: Layer["kind"]): Layer {
+  return { id, name, kind, visible: true, locked: false, opacity: 100, blend: "Normal" };
+}
+
+/**
+ * Mutate `mockDoc.layers` for a resolved `layer.*` command. Returns whether the
+ * document actually changed, so no-ops (missing target, locked guard) don't push
+ * a history entry — matching the core, which rejects those before recording.
+ */
+function applyLayerMutation(commandId: string, p: Record<string, unknown>): boolean {
+  const layers = mockDoc.layers;
+  const indexOf = (id: unknown) => layers.findIndex((l) => l.id === id);
+
+  switch (commandId) {
+    case "layer.create": {
+      layers.unshift(newMockLayer(String(p.id), String(p.name ?? "New layer"), "image"));
+      return true;
+    }
+    case "layer.duplicate": {
+      const i = indexOf(p.id);
+      if (i === -1) return false;
+      layers.splice(i, 0, { ...layers[i], id: String(p.new_id), name: `${layers[i].name} copy` });
+      return true;
+    }
+    case "layer.delete": {
+      const i = indexOf(p.id);
+      if (i === -1 || layers[i].locked) return false;
+      layers.splice(i, 1);
+      return true;
+    }
+    case "layer.rename": {
+      const l = layers[indexOf(p.id)];
+      if (!l || l.locked) return false;
+      l.name = String(p.name ?? l.name);
+      return true;
+    }
+    case "layer.reorder": {
+      const i = indexOf(p.id);
+      if (i === -1 || layers[i].locked) return false;
+      const to = Math.max(0, Math.min(layers.length - 1, Math.trunc(Number(p.index))));
+      if (to === i) return false;
+      const [moved] = layers.splice(i, 1);
+      layers.splice(to, 0, moved);
+      return true;
+    }
+    case "layer.set_visible": {
+      const l = layers[indexOf(p.id)];
+      if (!l) return false;
+      l.visible = Boolean(p.visible);
+      return true;
+    }
+    case "layer.set_locked": {
+      const l = layers[indexOf(p.id)];
+      if (!l) return false;
+      l.locked = Boolean(p.locked);
+      return true;
+    }
+    case "layer.set_opacity": {
+      const l = layers[indexOf(p.id)];
+      if (!l || l.locked) return false;
+      l.opacity = Math.round(clamp01(Number(p.opacity)) * 100);
+      return true;
+    }
+    case "layer.set_blend_mode": {
+      const l = layers[indexOf(p.id)];
+      if (!l || l.locked) return false;
+      l.blend = blendLabel(String(p.blend_mode));
+      return true;
+    }
+    case "layer.merge_down": {
+      const i = indexOf(p.id);
+      // Needs a layer below to merge into; the source row collapses away.
+      if (i === -1 || i >= layers.length - 1 || layers[i].locked) return false;
+      layers.splice(i, 1);
+      return true;
+    }
+    case "layer.flatten": {
+      const kept = layers.filter((l) => !l.visible);
+      if (kept.length === layers.length) return false; // nothing visible to flatten
+      mockDoc.layers = [newMockLayer(String(p.flattened_id), "Flattened", "image"), ...kept];
+      return true;
+    }
+    case "layer.group": {
+      const i = indexOf(p.id);
+      if (i === -1) return false;
+      // The flat layer DTO can't express nesting yet, so the group shows as a
+      // header row above its source. Hierarchical rendering is deferred — see
+      // `.plan/decisions.md` (DEC-FE-005-group-nesting).
+      layers.splice(i, 0, newMockLayer(String(p.group_id), String(p.name ?? "Group"), "group"));
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
 // --- Queries (read document state) -------------------------------------------
 
 export const api = {
@@ -148,20 +274,9 @@ export const api = {
   },
 
   // --- Mutations (request document changes) ----------------------------------
-
-  setLayerVisibility(id: string, visible: boolean): Promise<void> {
-    return bridge("set_layer_visibility", { id, visible }, () => {
-      const layer = mockDoc.layers.find((l) => l.id === id);
-      if (layer) layer.visible = visible;
-    });
-  },
-
-  setLayerLocked(id: string, locked: boolean): Promise<void> {
-    return bridge("set_layer_locked", { id, locked }, () => {
-      const layer = mockDoc.layers.find((l) => l.id === id);
-      if (layer) layer.locked = locked;
-    });
-  },
+  // Layer edits run through the command engine (`runCommand` below) so they are
+  // undoable and recorded in history, exactly like the Rust core. There are no
+  // direct layer setters here by design.
 
   // --- Workspace file operations ---------------------------------------------
   // These commands open native dialogs and read/write `.fleck` files in the Rust
@@ -180,10 +295,15 @@ export const api = {
       // Representative file that exercises both the version-warning and
       // missing-linked-asset paths so those dialogs are demonstrable.
       mockDoc.canvas = { width: 1200, height: 630 };
+      mockDoc.layers = [
+        { id: "layer-badge", name: "Badge", kind: "shape", visible: true, locked: false, opacity: 100, blend: "Normal" },
+        { id: "layer-art", name: "Artwork", kind: "image", visible: true, locked: false, opacity: 90, blend: "Normal" },
+        { id: "layer-bg", name: "Background", kind: "image", visible: true, locked: true, opacity: 100, blend: "Normal" },
+      ];
       mockDoc.meta = {
         name: "marketing-assets.fleck",
         dirty: false,
-        layerCount: 2,
+        layerCount: mockDoc.layers.length,
         selectedCount: 1,
         canvasSize: "1200 × 630 px",
       };
@@ -208,7 +328,17 @@ export const api = {
     return bridge("open_workspace_path", { path }, () => {
       const name = path.split(/[\\/]/).pop() ?? path;
       mockDoc.canvas = { width: 512, height: 512 };
-      mockDoc.meta = { name, dirty: false, layerCount: 2, selectedCount: 0, canvasSize: "512 × 512 px" };
+      mockDoc.layers = [
+        { id: "layer-icon", name: "Icon", kind: "image", visible: true, locked: false, opacity: 100, blend: "Normal" },
+        { id: "layer-grid", name: "Grid", kind: "shape", visible: false, locked: false, opacity: 60, blend: "Multiply" },
+      ];
+      mockDoc.meta = {
+        name,
+        dirty: false,
+        layerCount: mockDoc.layers.length,
+        selectedCount: 0,
+        canvasSize: "512 × 512 px",
+      };
       return { path, name, warnings: [], missingAssets: [] } satisfies OpenWorkspaceResult;
     });
   },
@@ -247,6 +377,8 @@ export const api = {
   newWorkspace(): Promise<void> {
     return bridge("new_workspace", {}, () => {
       mockDoc.canvas = { width: 0, height: 0 };
+      mockDoc.layers = [];
+      mockDoc.history = { entries: [], currentIndex: null };
       mockDoc.meta = { name: "Untitled.fleck", dirty: false, layerCount: 0, selectedCount: 0, canvasSize: "0 × 0 px" };
     });
   },
@@ -302,6 +434,14 @@ export const api = {
    */
   runCommand(commandId: string, parameters: Record<string, unknown> = {}): Promise<CommandExecution> {
     return bridge("run_command", { commandId, parameters }, () => {
+      // Layer commands mutate the mock document directly; the engine still
+      // records every applied change as an undoable history entry.
+      if (commandId.startsWith("layer.")) {
+        const changed = applyLayerMutation(commandId, parameters);
+        const label = LAYER_OP_LABELS[commandId] ?? commandId;
+        if (changed) pushHistory(commandId, label);
+        return { commandId, operationLabel: label } satisfies CommandExecution;
+      }
       const def = COMMAND_DEFINITIONS.find((c) => c.id === commandId);
       const label = operationLabel(def?.label ?? commandId, parameters);
       if (def?.undoable) pushHistory(commandId, label);

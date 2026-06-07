@@ -245,7 +245,7 @@ Acceptance criteria:
 
 ### TASK-FE-005: Build Layers Panel And Layer Inspector
 
-Status: open
+Status: done
 
 Requirements: REQ-039, REQ-040, REQ-042, REQ-052
 

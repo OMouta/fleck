@@ -80,7 +80,24 @@ export type RenderModel = {
   selections: { id: string; rect: Rect }[];
 };
 
-export type BlendMode = "Normal" | "Multiply" | "Screen" | "Overlay" | "Darken" | "Lighten";
+/** Mirrors `fleck-core::model::BlendMode`. */
+export type BlendMode =
+  | "Normal"
+  | "Multiply"
+  | "Screen"
+  | "Overlay"
+  | "Darken"
+  | "Lighten"
+  | "ColorDodge"
+  | "ColorBurn"
+  | "HardLight"
+  | "SoftLight"
+  | "Difference"
+  | "Exclusion"
+  | "Hue"
+  | "Saturation"
+  | "Color"
+  | "Luminosity";
 
 export type Layer = {
   id: string;
