@@ -109,6 +109,41 @@ export type Layer = {
   blend: BlendMode;
 };
 
+/**
+ * How a placed image object's source asset currently resolves. `replaced` marks
+ * an object whose source was swapped via `image.replace_source`. Mirrors the
+ * resolved state of `fleck-core::model::AssetSource` joined with link resolution.
+ */
+export type ImageSourceState = "linked" | "embedded" | "missing" | "replaced";
+
+/**
+ * UI projection of `fleck-core::model::ImageObject` joined with its `Asset`.
+ * Opacity is 0–100 for the UI (core stores 0.0–1.0). Transform fields are
+ * currently read-only in the inspector — see `.plan/decisions.md`
+ * (DEC-FE-006-image-transform-edit).
+ */
+export type ImageObject = {
+  id: string;
+  name: string;
+  sourceAssetId: string;
+  sourceState: ImageSourceState;
+  /** Asset display name / filename. */
+  sourceName: string;
+  /** Absolute path for linked assets; null for embedded. */
+  sourcePath: string | null;
+  /** Source image format label (e.g. "PNG"), when known. */
+  format: string | null;
+  /** Source pixel dimensions (e.g. "1200 × 630 px"), when known. */
+  dimensions: string | null;
+  position: Point;
+  scale: Size;
+  rotationDegrees: number;
+  opacity: number;
+  crop: Rect | null;
+  /** Set once the object has been rasterized into a layer. */
+  rasterizedLayerId: string | null;
+};
+
 export type Output = {
   id: string;
   filename: string;
@@ -174,6 +209,7 @@ export type RecentFile = {
 export type CommandGroup =
   | "workspace"
   | "layer"
+  | "image_object"
   | "selection"
   | "export"
   | "recipe"

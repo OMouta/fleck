@@ -31,6 +31,11 @@ Source: `.plan/spec.md`
   - Reason: the frontend `Layer` DTO (`src/lib/fleck-data.ts`) is a flat list with no parent/child or expansion fields, so hierarchy cannot be rendered yet. The core model carries group membership, but `get_layers` does not project it.
   - Resolution path: extend the layer DTO with group/parent + collapsed state when the real `get_layers` bridge lands (TASK-020 territory), then render indentation/collapse. Tracked as partial coverage for REQ-040.
 
+- DEC-FE-006-image-transform-edit: the image-object inspector (TASK-FE-006) shows position, scale, rotation, opacity, and crop **read-only**, with editable mutations limited to replace-source, rasterize, duplicate, and reveal-source.
+  - Affected requirement: REQ-039 (image object inspector).
+  - Reason: `fleck-core` (TASK-008) registered only import/place/duplicate/replace/rasterize image commands — there is no `image.set_position/scale/rotation/opacity/crop` or `image.delete_object` command to call, and adding core commands is out of scope for a frontend task.
+  - Resolution path: add image-object transform/opacity/crop/delete commands to the core, then make the inspector fields editable through them (a follow-up core task). Tracked as partial coverage for REQ-039.
+
 ## Environment Gaps
 
 - ENV-001: Resolved. Local Rust verification was initially blocked because `rustc` and `cargo` were not installed in the current shell.

@@ -15,6 +15,8 @@ import type {
   ExportArea,
   HistoryEntry,
   HistoryState,
+  ImageObject,
+  ImageSourceState,
   Layer,
   OpenWorkspaceResult,
   Point,
@@ -55,11 +57,42 @@ async function bridge<T>(command: string, args: Record<string, unknown>, mock: (
 
 // --- Mock document (stands in for Rust-owned authoritative state) -------------
 
+/** Mock asset row (stands in for `fleck-core::model::Asset` + link resolution). */
+type MockAsset = {
+  id: string;
+  name: string;
+  source: "linked" | "embedded";
+  path: string | null;
+  format: string | null;
+  width: number;
+  height: number;
+  /** A linked asset whose file could not be resolved. */
+  missing: boolean;
+};
+
+/** Mock placed image object (stands in for `fleck-core::model::ImageObject`). */
+type MockImageObject = {
+  id: string;
+  name: string;
+  sourceAssetId: string;
+  position: { x: number; y: number };
+  scale: { width: number; height: number };
+  rotationDegrees: number;
+  /** 0–100 for the UI (core stores 0.0–1.0). */
+  opacity: number;
+  crop: { x: number; y: number; width: number; height: number } | null;
+  rasterizedLayerId: string | null;
+  /** Set once `image.replace_source` swapped this object's source asset. */
+  replaced: boolean;
+};
+
 const mockDoc: {
   meta: WorkspaceMeta;
   /** Canvas dimensions in workspace pixels (0 = no document loaded yet). */
   canvas: { width: number; height: number };
   layers: Layer[];
+  assets: MockAsset[];
+  imageObjects: MockImageObject[];
   exportAreas: ExportArea[];
   /** Undo stack + cursor, mirroring `CommandEngine` (undoable commands only). */
   history: { entries: HistoryEntry[]; currentIndex: number | null };
@@ -75,6 +108,8 @@ const mockDoc: {
     canvasSize: "0 × 0 px",
   },
   layers: [],
+  assets: [],
+  imageObjects: [],
   exportAreas: [],
 };
 
@@ -244,6 +279,145 @@ function applyLayerMutation(commandId: string, p: Record<string, unknown>): bool
   }
 }
 
+// --- Mock image-object operations --------------------------------------------
+// Apply `image.*` core commands to the mock document and project placed image
+// objects (joined with their asset) into the `ImageObject` DTO the UI reads.
+
+/** Human labels for image history entries (mirrors core `CommandEffect` labels). */
+const IMAGE_OP_LABELS: Record<string, string> = {
+  "image.import_linked": "Import Image",
+  "image.import_clipboard": "Import Clipboard Image",
+  "image.import_drag_drop": "Import Dropped Image",
+  "image.place_asset": "Place Image Asset",
+  "image.duplicate_object": "Duplicate Image Object",
+  "image.replace_source": "Replace Image Source",
+  "image.rasterize_object": "Rasterize Image Object",
+};
+
+let mockAssetCounter = 0;
+function mockAssetId(): string {
+  mockAssetCounter += 1;
+  return `asset-${Date.now().toString(36)}-${mockAssetCounter.toString(36)}`;
+}
+
+/** Join a placed object with its asset into the read DTO + resolved source state. */
+function projectImageObject(o: MockImageObject): ImageObject {
+  const asset = mockDoc.assets.find((a) => a.id === o.sourceAssetId);
+  const sourceState: ImageSourceState = o.replaced
+    ? "replaced"
+    : !asset || asset.missing
+      ? "missing"
+      : asset.source === "linked"
+        ? "linked"
+        : "embedded";
+  return {
+    id: o.id,
+    name: o.name,
+    sourceAssetId: o.sourceAssetId,
+    sourceState,
+    sourceName: asset?.name ?? "(missing asset)",
+    sourcePath: asset?.path ?? null,
+    format: asset?.format ?? null,
+    dimensions: asset ? `${asset.width} × ${asset.height} px` : null,
+    position: { ...o.position },
+    scale: { ...o.scale },
+    rotationDegrees: o.rotationDegrees,
+    opacity: o.opacity,
+    crop: o.crop ? { ...o.crop } : null,
+    rasterizedLayerId: o.rasterizedLayerId,
+  };
+}
+
+/** Create a placed object from an existing asset using sensible default placement. */
+function placeMockObject(objectId: string, assetId: string, name: string): MockImageObject {
+  const asset = mockDoc.assets.find((a) => a.id === assetId);
+  return {
+    id: objectId,
+    name,
+    sourceAssetId: assetId,
+    position: { x: 0, y: 0 },
+    scale: { width: asset?.width ?? 256, height: asset?.height ?? 256 },
+    rotationDegrees: 0,
+    opacity: 100,
+    crop: null,
+    rasterizedLayerId: null,
+    replaced: false,
+  };
+}
+
+/**
+ * Mutate `mockDoc` for a resolved `image.*` command. Returns whether the document
+ * changed, so no-ops (missing target/asset) don't record a history entry.
+ */
+function applyImageMutation(commandId: string, p: Record<string, unknown>): boolean {
+  const objects = mockDoc.imageObjects;
+  const findObject = (id: unknown) => objects.find((o) => o.id === id);
+
+  switch (commandId) {
+    case "image.import_linked": {
+      const path = typeof p.path === "string" ? p.path : null;
+      mockDoc.assets.push({
+        id: String(p.asset_id),
+        name: String(p.name ?? "image"),
+        source: "linked",
+        path,
+        format: formatFromPath(path),
+        width: 1024,
+        height: 1024,
+        missing: false,
+      });
+      objects.push(placeMockObject(String(p.object_id), String(p.asset_id), String(p.name ?? "Image")));
+      return true;
+    }
+    case "image.import_clipboard":
+    case "image.import_drag_drop":
+    case "image.place_asset": {
+      if (!mockDoc.assets.some((a) => a.id === p.asset_id)) return false;
+      objects.push(placeMockObject(String(p.object_id), String(p.asset_id), String(p.name ?? "Image")));
+      return true;
+    }
+    case "image.duplicate_object": {
+      const src = findObject(p.object_id);
+      if (!src) return false;
+      objects.push({ ...src, id: String(p.new_object_id), name: `${src.name} Copy` });
+      return true;
+    }
+    case "image.replace_source": {
+      const obj = findObject(p.object_id);
+      if (!obj || !mockDoc.assets.some((a) => a.id === p.asset_id)) return false;
+      obj.sourceAssetId = String(p.asset_id);
+      obj.replaced = true;
+      obj.rasterizedLayerId = null;
+      return true;
+    }
+    case "image.rasterize_object": {
+      const obj = findObject(p.object_id);
+      if (!obj) return false;
+      mockDoc.layers.unshift({
+        id: String(p.layer_id),
+        name: obj.name,
+        kind: "image",
+        visible: true,
+        locked: false,
+        opacity: 100,
+        blend: "Normal",
+      });
+      obj.rasterizedLayerId = String(p.layer_id);
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+/** Guess an uppercase format label from a file extension. */
+function formatFromPath(path: string | null): string | null {
+  const ext = path?.split(".").pop()?.toLowerCase();
+  if (!ext) return null;
+  if (ext === "jpg" || ext === "jpeg") return "JPEG";
+  return ext.toUpperCase();
+}
+
 // --- Queries (read document state) -------------------------------------------
 
 export const api = {
@@ -253,6 +427,10 @@ export const api = {
 
   getLayers(): Promise<Layer[]> {
     return bridge("get_layers", {}, () => mockDoc.layers.map((l) => ({ ...l })));
+  },
+
+  getImageObjects(): Promise<ImageObject[]> {
+    return bridge("get_image_objects", {}, () => mockDoc.imageObjects.map(projectImageObject));
   },
 
   getExportAreas(): Promise<ExportArea[]> {
@@ -300,6 +478,18 @@ export const api = {
         { id: "layer-art", name: "Artwork", kind: "image", visible: true, locked: false, opacity: 90, blend: "Normal" },
         { id: "layer-bg", name: "Background", kind: "image", visible: true, locked: true, opacity: 100, blend: "Normal" },
       ];
+      // Placed image objects spanning the resolvable states so the Images panel
+      // can demonstrate linked / embedded / missing distinctly.
+      mockDoc.assets = [
+        { id: "asset-tex", name: "texture.jpg", source: "linked", path: "C:/work/linked/texture.jpg", format: "JPEG", width: 2048, height: 2048, missing: false },
+        { id: "asset-badge", name: "badge.png", source: "embedded", path: null, format: "PNG", width: 512, height: 512, missing: false },
+        { id: "asset-hero", name: "hero-render.png", source: "linked", path: "C:/work/linked/hero-render.png", format: "PNG", width: 1600, height: 900, missing: true },
+      ];
+      mockDoc.imageObjects = [
+        { id: "img-tex", name: "Texture", sourceAssetId: "asset-tex", position: { x: 0, y: 0 }, scale: { width: 600, height: 600 }, rotationDegrees: 12, opacity: 60, crop: { x: 0, y: 0, width: 1024, height: 1024 }, rasterizedLayerId: null, replaced: false },
+        { id: "img-badge", name: "Badge", sourceAssetId: "asset-badge", position: { x: 840, y: 40 }, scale: { width: 160, height: 160 }, rotationDegrees: 0, opacity: 90, crop: null, rasterizedLayerId: null, replaced: false },
+        { id: "img-hero", name: "Hero", sourceAssetId: "asset-hero", position: { x: 0, y: 0 }, scale: { width: 1200, height: 675 }, rotationDegrees: 0, opacity: 100, crop: null, rasterizedLayerId: null, replaced: false },
+      ];
       mockDoc.meta = {
         name: "marketing-assets.fleck",
         dirty: false,
@@ -332,6 +522,12 @@ export const api = {
         { id: "layer-icon", name: "Icon", kind: "image", visible: true, locked: false, opacity: 100, blend: "Normal" },
         { id: "layer-grid", name: "Grid", kind: "shape", visible: false, locked: false, opacity: 60, blend: "Multiply" },
       ];
+      mockDoc.assets = [
+        { id: "asset-mark", name: "mark.png", source: "embedded", path: null, format: "PNG", width: 512, height: 512, missing: false },
+      ];
+      mockDoc.imageObjects = [
+        { id: "img-mark", name: "Mark", sourceAssetId: "asset-mark", position: { x: 64, y: 64 }, scale: { width: 384, height: 384 }, rotationDegrees: 0, opacity: 100, crop: null, rasterizedLayerId: null, replaced: false },
+      ];
       mockDoc.meta = {
         name,
         dirty: false,
@@ -343,8 +539,75 @@ export const api = {
     });
   },
 
-  openImage(): Promise<void> {
-    return bridge("open_image", {}, () => undefined);
+  // --- Image acquisition (native hooks) --------------------------------------
+  // These obtain image bytes/paths through native dialogs, the clipboard, or
+  // drag/drop. The actual placement is then performed by the undoable `image.*`
+  // commands (run via the command engine). Real byte/clipboard/reveal access is
+  // Tauri-backed (TASK-020); the mocks below stand in for a browser dev session.
+
+  /** Opens a native image picker; resolves to the chosen path, or null if cancelled. */
+  pickImageFile(): Promise<string | null> {
+    return bridge("pick_image_file", {}, () => "C:/work/linked/imported-art.png");
+  },
+
+  /** Decodes a clipboard image into a new embedded asset; resolves its id + name. */
+  acquireClipboardAsset(): Promise<{ assetId: string; name: string } | null> {
+    return bridge("acquire_clipboard_asset", {}, () => {
+      const assetId = mockAssetId();
+      const name = "pasted-image.png";
+      mockDoc.assets.push({
+        id: assetId,
+        name,
+        source: "embedded",
+        path: null,
+        format: "PNG",
+        width: 800,
+        height: 600,
+        missing: false,
+      });
+      return { assetId, name };
+    });
+  },
+
+  /** Decodes a dropped image file into a new embedded asset; resolves its id + name. */
+  acquireDroppedAsset(name: string): Promise<{ assetId: string; name: string } | null> {
+    return bridge("acquire_dropped_asset", { name }, () => {
+      const assetId = mockAssetId();
+      mockDoc.assets.push({
+        id: assetId,
+        name,
+        source: "embedded",
+        path: null,
+        format: formatFromPath(name) ?? "PNG",
+        width: 1280,
+        height: 720,
+        missing: false,
+      });
+      return { assetId, name };
+    });
+  },
+
+  /** Picks a replacement image and registers it as a new asset; resolves its id. */
+  acquireReplacementAsset(): Promise<string | null> {
+    return bridge("acquire_replacement_asset", {}, () => {
+      const assetId = mockAssetId();
+      mockDoc.assets.push({
+        id: assetId,
+        name: "replacement.png",
+        source: "embedded",
+        path: null,
+        format: "PNG",
+        width: 1024,
+        height: 1024,
+        missing: false,
+      });
+      return assetId;
+    });
+  },
+
+  /** Reveals a linked image object's source file in the OS file manager. */
+  revealImageSource(objectId: string): Promise<void> {
+    return bridge("reveal_image_source", { objectId }, () => undefined);
   },
 
   saveWorkspace(): Promise<void> {
@@ -378,6 +641,8 @@ export const api = {
     return bridge("new_workspace", {}, () => {
       mockDoc.canvas = { width: 0, height: 0 };
       mockDoc.layers = [];
+      mockDoc.assets = [];
+      mockDoc.imageObjects = [];
       mockDoc.history = { entries: [], currentIndex: null };
       mockDoc.meta = { name: "Untitled.fleck", dirty: false, layerCount: 0, selectedCount: 0, canvasSize: "0 × 0 px" };
     });
@@ -439,6 +704,12 @@ export const api = {
       if (commandId.startsWith("layer.")) {
         const changed = applyLayerMutation(commandId, parameters);
         const label = LAYER_OP_LABELS[commandId] ?? commandId;
+        if (changed) pushHistory(commandId, label);
+        return { commandId, operationLabel: label } satisfies CommandExecution;
+      }
+      if (commandId.startsWith("image.")) {
+        const changed = applyImageMutation(commandId, parameters);
+        const label = IMAGE_OP_LABELS[commandId] ?? commandId;
         if (changed) pushHistory(commandId, label);
         return { commandId, operationLabel: label } satisfies CommandExecution;
       }

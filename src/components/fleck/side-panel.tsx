@@ -24,14 +24,22 @@ import {
   ArrowDown,
   ArrowDownToLine,
   FolderPlus,
+  Link2,
+  Box,
+  RefreshCw,
+  ExternalLink,
+  Replace,
+  ClipboardPaste,
   History as HistoryIcon,
   Undo2,
   Redo2,
 } from "lucide-react";
-import type { ExportArea, Layer } from "@/lib/fleck-data";
+import type { ExportArea, ImageObject, ImageSourceState, Layer } from "@/lib/fleck-data";
 import { api } from "@/lib/api";
-import { useExportAreas, useHistory, useHistoryJumpSupported, useLayers } from "@/lib/queries";
+import { useExportAreas, useHistory, useHistoryJumpSupported, useImageObjects, useLayers } from "@/lib/queries";
 import { BLEND_MODES } from "@/lib/layer-commands";
+import { SOURCE_STATE_LABEL } from "@/lib/image-commands";
+import { openImageFlow, pasteImageFlow, replaceImageFlow, revealImageSourceFlow } from "@/lib/image-import";
 import { cn } from "@/lib/utils";
 import { useUIStore, type SideTab } from "@/store/ui-store";
 import { useCommandStore } from "@/store/command-store";
@@ -63,34 +71,24 @@ export function SidePanel() {
   const tab = useUIStore((s) => s.sideTab);
   const setTab = useUIStore((s) => s.setSideTab);
   const { data: layers = [] } = useLayers();
+  const { data: imageObjects = [] } = useImageObjects();
   const { data: exportAreas = [] } = useExportAreas();
 
   return (
-    <Tabs
-      value={tab}
-      onValueChange={(v) => setTab(v as SideTab)}
-      asChild
-    >
+    <Tabs value={tab} onValueChange={(v) => setTab(v as SideTab)} asChild>
       <aside className="flex w-72 shrink-0 flex-col border-l border-border bg-sidebar" aria-label="Editor panels">
         <TabsList className="border-b border-border p-1.5">
-          <TabsTrigger value="layers">
-            <Layers className="size-4" />
-            Layers
-            <TabCount value={layers.length} active={tab === "layers"} />
-          </TabsTrigger>
-          <TabsTrigger value="exports">
-            <FileDown className="size-4" />
-            Exports
-            <TabCount value={exportAreas.length} active={tab === "exports"} />
-          </TabsTrigger>
-          <TabsTrigger value="history">
-            <HistoryIcon className="size-4" />
-            History
-          </TabsTrigger>
+          <PanelTab value="layers" label="Layers" icon={Layers} count={layers.length} active={tab === "layers"} />
+          <PanelTab value="images" label="Images" icon={ImageIcon} count={imageObjects.length} active={tab === "images"} />
+          <PanelTab value="exports" label="Exports" icon={FileDown} count={exportAreas.length} active={tab === "exports"} />
+          <PanelTab value="history" label="History" icon={HistoryIcon} active={tab === "history"} />
         </TabsList>
 
         <TabsContent value="layers">
           <LayersPanel />
+        </TabsContent>
+        <TabsContent value="images">
+          <ImagesPanel />
         </TabsContent>
         <TabsContent value="exports">
           <ExportsPanel />
@@ -103,16 +101,34 @@ export function SidePanel() {
   );
 }
 
-function TabCount({ value, active }: { value: number; active: boolean }) {
+/** Icon-only panel tab (labels live in the tooltip/aria so four tabs fit the rail). */
+function PanelTab({
+  value,
+  label,
+  icon: Icon,
+  count,
+  active,
+}: {
+  value: SideTab;
+  label: string;
+  icon: LucideIcon;
+  count?: number;
+  active: boolean;
+}) {
   return (
-    <span
-      className={cn(
-        "rounded px-1 font-mono text-[10px]",
-        active ? "bg-background text-muted-foreground" : "text-muted-foreground",
+    <TabsTrigger value={value} title={label} aria-label={label}>
+      <Icon className="size-4" />
+      {count !== undefined && (
+        <span
+          className={cn(
+            "rounded px-1 font-mono text-[10px]",
+            active ? "bg-background text-muted-foreground" : "text-muted-foreground",
+          )}
+        >
+          {count}
+        </span>
       )}
-    >
-      {value}
-    </span>
+    </TabsTrigger>
   );
 }
 
@@ -701,6 +717,257 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       <div className="flex-1 overflow-hidden">{children}</div>
     </div>
   );
+}
+
+// --- Images panel ------------------------------------------------------------
+
+/** Image-object actions an action surface can request; mapped to core flows below. */
+type ImageAction = "duplicate" | "replace" | "rasterize" | "reveal";
+
+/** Per source-state presentation: icon + accent color (label from SOURCE_STATE_LABEL). */
+const SOURCE_STATE_META: Record<ImageSourceState, { icon: LucideIcon; className: string }> = {
+  linked: { icon: Link2, className: "text-primary" },
+  embedded: { icon: Box, className: "text-muted-foreground" },
+  missing: { icon: AlertTriangle, className: "text-destructive" },
+  replaced: { icon: RefreshCw, className: "text-warning" },
+};
+
+function ImagesPanel() {
+  const { data: objects = [], isLoading } = useImageObjects();
+  const selected = useUIStore((s) => s.selectedImageObjectId);
+  const onSelect = useUIStore((s) => s.setSelectedImageObjectId);
+  const execute = useCommandStore((s) => s.execute);
+
+  const selectedObject = objects.find((o) => o.id === selected) ?? objects[0];
+
+  // Import flows go through native acquisition + the undoable image command engine
+  // (see image-import). Pure mutations execute their core command directly.
+  const handleAction = (action: ImageAction, object: ImageObject) => {
+    switch (action) {
+      case "duplicate":
+        execute("image.duplicate_object", { object_id: object.id });
+        break;
+      case "rasterize":
+        execute("image.rasterize_object", { object_id: object.id });
+        break;
+      case "replace":
+        replaceImageFlow(object.id);
+        break;
+      case "reveal":
+        revealImageSourceFlow(object.id);
+        break;
+    }
+  };
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Placed images</span>
+        <div className="flex items-center gap-0.5">
+          <HeaderButton onClick={() => openImageFlow()} icon={Plus} label="Open image" />
+          <HeaderButton onClick={() => pasteImageFlow()} icon={ClipboardPaste} label="Paste image" />
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-1.5 pb-2">
+        {isLoading && <p className="px-3 py-4 text-[13px] text-muted-foreground">Loading images…</p>}
+        {!isLoading && objects.length === 0 && (
+          <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">
+            No placed images. Open, paste, or drag an image into the workspace.
+          </p>
+        )}
+        {objects.map((object) => (
+          <ImageRow
+            key={object.id}
+            object={object}
+            selected={selectedObject?.id === object.id}
+            onSelect={() => onSelect(object.id)}
+            onAction={(a) => handleAction(a, object)}
+          />
+        ))}
+      </div>
+
+      {selectedObject ? (
+        <ImageObjectInspector object={selectedObject} onAction={(a) => handleAction(a, selectedObject)} />
+      ) : (
+        <div className="border-t border-border p-3" aria-label="Inspector">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Inspector</p>
+          <p className="text-[13px] text-muted-foreground">No selection.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HeaderButton({ onClick, icon: Icon, label }: { onClick: () => void; icon: LucideIcon; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+    >
+      <Icon className="size-4" />
+    </button>
+  );
+}
+
+function ImageRow({
+  object,
+  selected,
+  onSelect,
+  onAction,
+}: {
+  object: ImageObject;
+  selected: boolean;
+  onSelect: () => void;
+  onAction: (action: ImageAction) => void;
+}) {
+  const isLinked = object.sourceState === "linked";
+  const isRasterized = object.rasterizedLayerId !== null;
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <button
+          onClick={onSelect}
+          aria-pressed={selected}
+          aria-current={selected}
+          className={cn(
+            "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+            selected ? "bg-primary/12 ring-1 ring-primary/30" : "hover:bg-secondary/70",
+          )}
+        >
+          <SourceStateIcon state={object.sourceState} />
+          <span className="flex-1 truncate text-[13px] text-foreground">{object.name}</span>
+          <span className="sr-only">{SOURCE_STATE_LABEL[object.sourceState]}</span>
+          {isRasterized && (
+            <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">rast</span>
+          )}
+          {object.dimensions && (
+            <span className="font-mono text-[10px] text-muted-foreground">{object.dimensions}</span>
+          )}
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => onAction("duplicate")}>
+          <Copy />
+          Duplicate
+          <ContextMenuShortcut>⌘J</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onAction("replace")}>
+          <Replace />
+          Replace source…
+        </ContextMenuItem>
+        <ContextMenuItem disabled={isRasterized} onSelect={() => onAction("rasterize")}>
+          <Layers />
+          Rasterize
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem disabled={!isLinked} onSelect={() => onAction("reveal")}>
+          <ExternalLink />
+          Reveal source
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+function SourceStateIcon({ state }: { state: ImageSourceState }) {
+  const { icon: Icon, className } = SOURCE_STATE_META[state];
+  return <Icon className={cn("size-4 shrink-0", className)} />;
+}
+
+function SourceStateBadge({ state }: { state: ImageSourceState }) {
+  const { icon: Icon, className } = SOURCE_STATE_META[state];
+  return (
+    <span className={cn("flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide", className)}>
+      <Icon className="size-3" />
+      {SOURCE_STATE_LABEL[state]}
+    </span>
+  );
+}
+
+function ImageObjectInspector({
+  object,
+  onAction,
+}: {
+  object: ImageObject;
+  onAction: (action: ImageAction) => void;
+}) {
+  const isLinked = object.sourceState === "linked";
+  const isRasterized = object.rasterizedLayerId !== null;
+
+  return (
+    <div className="max-h-[58%] shrink-0 overflow-y-auto border-t border-border p-3" aria-label="Inspector">
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Inspector</p>
+        <SourceStateBadge state={object.sourceState} />
+      </div>
+
+      <div className="space-y-2.5">
+        <Field label="Name">
+          <span className="truncate text-[13px] text-foreground">{object.name}</span>
+        </Field>
+        <Field label="Source">
+          <span className="block truncate text-[12px] text-foreground" title={object.sourcePath ?? object.sourceName}>
+            {object.sourceName}
+          </span>
+        </Field>
+        <Field label="Format">
+          <Readonly>{[object.format, object.dimensions].filter(Boolean).join(" · ") || "—"}</Readonly>
+        </Field>
+      </div>
+
+      {object.sourceState === "missing" && (
+        <p className="mt-2.5 flex items-start gap-1.5 rounded-md bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
+          <AlertTriangle className="mt-px size-3 shrink-0" />
+          Linked file is missing. Replace the source to relink it.
+        </p>
+      )}
+
+      {/* Transform is shown read-only: the core has no image-object transform
+          command yet (see DEC-FE-006-image-transform-edit). */}
+      <p className="mb-1.5 mt-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Transform</p>
+      <div className="space-y-2.5">
+        <Field label="Position">
+          <Readonly>
+            {round(object.position.x)}, {round(object.position.y)}
+          </Readonly>
+        </Field>
+        <Field label="Scale">
+          <Readonly>
+            {round(object.scale.width)} × {round(object.scale.height)}
+          </Readonly>
+        </Field>
+        <Field label="Rotation">
+          <Readonly>{round(object.rotationDegrees)}°</Readonly>
+        </Field>
+        <Field label="Opacity">
+          <Readonly>{object.opacity}%</Readonly>
+        </Field>
+        <Field label="Crop">
+          <Readonly>{object.crop ? `${round(object.crop.width)} × ${round(object.crop.height)}` : "None"}</Readonly>
+        </Field>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-1.5 border-t border-border pt-3">
+        <InspectorButton onClick={() => onAction("replace")} icon={Replace} label="Replace" />
+        <InspectorButton onClick={() => onAction("reveal")} icon={ExternalLink} label="Reveal" disabled={!isLinked} />
+        <InspectorButton onClick={() => onAction("rasterize")} icon={Layers} label="Rasterize" disabled={isRasterized} />
+        <InspectorButton onClick={() => onAction("duplicate")} icon={Copy} label="Duplicate" />
+      </div>
+    </div>
+  );
+}
+
+/** Static, non-editable inspector value. */
+function Readonly({ children }: { children: ReactNode }) {
+  return <span className="font-mono text-[11px] text-foreground">{children}</span>;
+}
+
+function round(n: number): number {
+  return Math.round(n * 10) / 10;
 }
 
 function ExportsPanel() {

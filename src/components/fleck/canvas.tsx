@@ -15,6 +15,7 @@ import { useRenderModel } from "@/lib/queries";
 import { paintScene, type Palette } from "@/lib/render";
 import type { Point } from "@/lib/fleck-data";
 import { cn } from "@/lib/utils";
+import { openImageFlow, dropImageFlow } from "@/lib/image-import";
 import { useUIStore } from "@/store/ui-store";
 import { useViewportStore } from "@/store/viewport-store";
 import { useWorkspaceFilesStore } from "@/store/workspace-files-store";
@@ -44,8 +45,8 @@ export function Canvas() {
   const spaceRef = useRef(false);
 
   const activeTool = useUIStore((s) => s.activeTool);
-  const openImage = useWorkspaceFilesStore((s) => s.openImage);
   const newWorkspace = useWorkspaceFilesStore((s) => s.newWorkspace);
+  const [dragOver, setDragOver] = useState(false);
 
   const origin = useViewportStore((s) => s.origin);
   const zoom = useViewportStore((s) => s.zoom);
@@ -214,6 +215,24 @@ export function Canvas() {
     }
   };
 
+  // Drag image files into the workspace to import them (REQ-050).
+  const onDragOverFiles = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    if (!dragOver) setDragOver(true);
+  };
+  const onDragLeaveFiles = (e: React.DragEvent) => {
+    if (e.currentTarget === e.target) setDragOver(false);
+  };
+  const onDropFiles = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    setDragOver(false);
+    const file = Array.from(e.dataTransfer.files).find((f) => f.type.startsWith("image/"));
+    if (file) dropImageFlow(file.name);
+  };
+
   const cursor = panning
     ? "grabbing"
     : activeTool === "pan" || spaceHeld
@@ -234,12 +253,23 @@ export function Canvas() {
       onPointerCancel={endPan}
       onKeyDown={onKeyDown}
       onKeyUp={onKeyUp}
+      onDragOver={onDragOverFiles}
+      onDragLeave={onDragLeaveFiles}
+      onDrop={onDropFiles}
       className="relative flex-1 overflow-hidden bg-background outline-none"
       style={{ cursor }}
     >
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
 
-      {isEmpty && <EmptyState onOpenImage={() => openImage()} onNewWorkspace={() => newWorkspace()} />}
+      {dragOver && (
+        <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-primary/5">
+          <span className="rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground">
+            Drop image to import
+          </span>
+        </div>
+      )}
+
+      {isEmpty && <EmptyState onOpenImage={() => openImageFlow()} onNewWorkspace={() => newWorkspace()} />}
 
       {/* Active tool indicator (top-left) */}
       <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-md border border-border bg-card/80 px-2.5 py-1.5 text-xs backdrop-blur-sm">

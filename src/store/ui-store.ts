@@ -9,7 +9,7 @@
  */
 import { create } from "zustand";
 
-export type SideTab = "layers" | "exports" | "history";
+export type SideTab = "layers" | "images" | "exports" | "history";
 
 type UIState = {
   // Active tool selection
@@ -19,6 +19,10 @@ type UIState = {
   // Which layer row is focused in the inspector (UI focus, not document data)
   selectedLayerId: string | null;
   setSelectedLayerId: (id: string) => void;
+
+  // Which placed image object is focused in the Images panel inspector
+  selectedImageObjectId: string | null;
+  setSelectedImageObjectId: (id: string) => void;
 
   // Command palette visibility
   paletteOpen: boolean;
@@ -38,6 +42,9 @@ export const useUIStore = create<UIState>((set) => ({
 
   selectedLayerId: null,
   setSelectedLayerId: (id) => set({ selectedLayerId: id }),
+
+  selectedImageObjectId: null,
+  setSelectedImageObjectId: (id) => set({ selectedImageObjectId: id }),
 
   paletteOpen: false,
   setPaletteOpen: (open) => set({ paletteOpen: open }),

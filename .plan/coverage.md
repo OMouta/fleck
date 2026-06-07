@@ -262,3 +262,27 @@ Coverage impact:
 Known gaps:
 - The dev mock does not snapshot-revert document state on undo (pre-existing mock limitation; the real Rust engine restores via snapshots). Forward layer operations and history labels are fully exercised.
 - Hierarchical group rendering is deferred (DEC-FE-005-group-nesting).
+
+### TASK-FE-006
+
+Status: done
+
+Evidence:
+- Added an Images side-panel tab in `src/components/fleck/side-panel.tsx`: a placed-image list with per-state source icons, a row context menu (duplicate / replace source / rasterize / reveal), and an image-object inspector showing source state, source name/path, format + dimensions, read-only transform (position/scale/rotation/opacity/crop), a missing-source warning, and Replace/Reveal/Rasterize/Duplicate actions. Converted the panel tabs to icon+count so four tabs fit the rail (labels in tooltip/aria).
+- Added import flows in `src/lib/image-import.ts`: open (native picker → `image.import_linked`), paste (clipboard → `image.import_clipboard`), drag-drop (`image.import_drag_drop`), replace (`image.replace_source`), and reveal source. Each acquires through a native hook then places via the undoable command engine and reveals the Images panel.
+- Added `src/lib/image-commands.ts` resolver: generates the object/asset/layer IDs core `image.*` commands require, defaults the target to the selected object, and derives a name from the picked path.
+- Wired image-command resolution + created-object selection into `src/store/command-store.ts`; added `selectedImageObjectId` to `src/store/ui-store.ts` and the `images` SideTab.
+- Extended the mock backend in `src/lib/api.ts`: added asset/image-object document state, `get_image_objects` projecting the joined `ImageObject` DTO with resolved source state, `image.*` mutation application + history, native acquisition mocks (`pick_image_file`, clipboard/drop/replacement asset acquisition, reveal), and seeded placed images spanning linked/embedded/missing on open.
+- Added the `ImageObject`/`ImageSourceState` DTO and the `image_object` command group to `src/lib/fleck-data.ts`; surfaced `image.duplicate_object`/`image.rasterize_object` in the palette (`command-registry.ts`) with the new Images group label/icon/order + context boost in `command-palette.tsx`.
+- Wired imports into surfaces: File menu (Open image → flow, new Paste image item), canvas drag-and-drop with a drop overlay (`canvas.tsx`), and a global ⌘/Ctrl+V paste guard in `App.tsx`.
+- Verified `npm run build` (tsc typecheck + vite build) passes.
+
+Coverage impact:
+- REQ-039: image-object inspector implemented showing all listed properties + source state. Transform editing is read-only (no core command) — deferred per DEC-FE-006-image-transform-edit, so REQ-039 stays partial for image objects.
+- REQ-046: import/replace/reveal/clipboard/drag-drop route through the `api` bridge (Tauri-forwarding with a browser mock fallback), keeping native acquisition in the platform layer.
+- REQ-050: image paste, drag-image-in, and replace flows implemented; linked / embedded / missing / replaced asset states are visually distinguishable in the list and inspector.
+
+Known gaps:
+- Image-object transform/opacity/crop edit and image-object delete have no core command yet (DEC-FE-006-image-transform-edit).
+- Import flows are reachable from the File menu, canvas drop, Images panel header, and ⌘V; they are not palette commands (import needs native acquisition). Palette exposes duplicate/rasterize.
+- Mock undo does not snapshot-revert (shared pre-existing limitation).

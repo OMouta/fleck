@@ -11,6 +11,7 @@ import { api } from "./api";
 export const queryKeys = {
   workspaceMeta: ["workspace", "meta"] as const,
   layers: ["document", "layers"] as const,
+  imageObjects: ["document", "image-objects"] as const,
   exportAreas: ["document", "export-areas"] as const,
   history: ["document", "history"] as const,
   recentFiles: ["workspace", "recent-files"] as const,
@@ -25,6 +26,10 @@ export function useWorkspaceMeta() {
 
 export function useLayers() {
   return useQuery({ queryKey: queryKeys.layers, queryFn: api.getLayers });
+}
+
+export function useImageObjects() {
+  return useQuery({ queryKey: queryKeys.imageObjects, queryFn: api.getImageObjects });
 }
 
 export function useExportAreas() {

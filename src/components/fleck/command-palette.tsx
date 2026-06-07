@@ -34,17 +34,28 @@ const GROUP_LABEL: Record<CommandGroup, string> = {
   recipe: "Recipes",
   export: "Export",
   layer: "Layers",
+  image_object: "Images",
   selection: "Selection",
   view: "View",
   workspace: "Workspace",
   tool: "Tools",
 };
 
-const GROUP_ORDER: CommandGroup[] = ["recipe", "export", "layer", "selection", "view", "workspace", "tool"];
+const GROUP_ORDER: CommandGroup[] = [
+  "recipe",
+  "export",
+  "layer",
+  "image_object",
+  "selection",
+  "view",
+  "workspace",
+  "tool",
+];
 
 const GROUP_ICON: Record<CommandGroup, LucideIcon> = {
   workspace: FolderOpen,
   layer: Layers,
+  image_object: ImageIcon,
   selection: SquareDashed,
   export: FileDown,
   recipe: Wand2,
@@ -82,6 +93,7 @@ export function CommandPalette() {
   const { data: commands = [] } = useCommands();
 
   const selectedLayerId = useUIStore((s) => s.selectedLayerId);
+  const selectedImageObjectId = useUIStore((s) => s.selectedImageObjectId);
   const sideTab = useUIStore((s) => s.sideTab);
   const openExportAreaId = useUIStore((s) => s.openExportAreaId);
 
@@ -106,10 +118,11 @@ export function CommandPalette() {
   const contextBoost = useMemo(() => {
     return (group: CommandGroup): number => {
       if (group === "layer" && selectedLayerId) return 6;
+      if (group === "image_object" && (selectedImageObjectId || sideTab === "images")) return 6;
       if (group === "export" && (openExportAreaId || sideTab === "exports")) return 6;
       return 0;
     };
-  }, [selectedLayerId, openExportAreaId, sideTab]);
+  }, [selectedLayerId, selectedImageObjectId, openExportAreaId, sideTab]);
 
   const byId = useMemo(() => new Map(commands.map((c) => [c.id, c])), [commands]);
   const lastDef = lastInvocation ? byId.get(lastInvocation.id) : undefined;

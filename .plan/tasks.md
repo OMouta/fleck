@@ -285,7 +285,7 @@ Acceptance criteria:
 
 ### TASK-FE-006: Build Image Import And Object Inspector UI
 
-Status: open
+Status: done
 
 Requirements: REQ-039, REQ-046, REQ-050
 

@@ -24,7 +24,6 @@ type WorkspaceFilesState = {
   openWorkspace: () => Promise<void>;
   openWorkspacePath: (path: string) => Promise<void>;
   newWorkspace: () => Promise<void>;
-  openImage: () => Promise<void>;
   save: () => Promise<void>;
   saveAs: () => Promise<void>;
 
@@ -40,6 +39,7 @@ type WorkspaceFilesState = {
 function invalidateDocument() {
   queryClient.invalidateQueries({ queryKey: queryKeys.workspaceMeta });
   queryClient.invalidateQueries({ queryKey: queryKeys.layers });
+  queryClient.invalidateQueries({ queryKey: queryKeys.imageObjects });
   queryClient.invalidateQueries({ queryKey: queryKeys.exportAreas });
   queryClient.invalidateQueries({ queryKey: queryKeys.history });
   queryClient.invalidateQueries({ queryKey: queryKeys.renderModel });
@@ -63,11 +63,6 @@ export const useWorkspaceFilesStore = create<WorkspaceFilesState>((set, get) => 
 
   newWorkspace: async () => {
     await api.newWorkspace();
-    invalidateDocument();
-  },
-
-  openImage: async () => {
-    await api.openImage();
     invalidateDocument();
   },
 

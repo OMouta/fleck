@@ -1,6 +1,7 @@
-import { FolderOpen, FilePlus2, ImageIcon, Save, SaveAll, Clock } from "lucide-react";
+import { FolderOpen, FilePlus2, ImageIcon, ClipboardPaste, Save, SaveAll, Clock } from "lucide-react";
 import { useRecentFiles } from "@/lib/queries";
 import { useWorkspaceFilesStore } from "@/store/workspace-files-store";
+import { openImageFlow, pasteImageFlow } from "@/lib/image-import";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -17,7 +18,6 @@ export function FileMenu() {
   const newWorkspace = useWorkspaceFilesStore((s) => s.newWorkspace);
   const openWorkspace = useWorkspaceFilesStore((s) => s.openWorkspace);
   const openWorkspacePath = useWorkspaceFilesStore((s) => s.openWorkspacePath);
-  const openImage = useWorkspaceFilesStore((s) => s.openImage);
   const save = useWorkspaceFilesStore((s) => s.save);
   const saveAs = useWorkspaceFilesStore((s) => s.saveAs);
   const { data: recent = [] } = useRecentFiles();
@@ -38,9 +38,14 @@ export function FileMenu() {
           Open workspace…
           <DropdownMenuShortcut>⌘O</DropdownMenuShortcut>
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => openImage()}>
+        <DropdownMenuItem onSelect={() => openImageFlow()}>
           <ImageIcon />
           Open image…
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => pasteImageFlow()}>
+          <ClipboardPaste />
+          Paste image
+          <DropdownMenuShortcut>⌘V</DropdownMenuShortcut>
         </DropdownMenuItem>
 
         <DropdownMenuSub>

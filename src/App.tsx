@@ -7,6 +7,7 @@ import { StatusBar } from "@/components/fleck/status-bar";
 import { CommandPalette } from "@/components/fleck/command-palette";
 import { WorkspaceDialogs } from "@/components/fleck/workspace-dialogs";
 import { TOOLS } from "@/lib/fleck-data";
+import { pasteImageFlow } from "@/lib/image-import";
 import { useUIStore } from "@/store/ui-store";
 import { useWorkspaceFilesStore } from "@/store/workspace-files-store";
 import { useCommandStore } from "@/store/command-store";
@@ -56,6 +57,15 @@ function App() {
         if (key === "y") {
           e.preventDefault();
           commands.redo();
+          return;
+        }
+        if (key === "v" && !e.shiftKey) {
+          // Paste an image from the clipboard, unless the user is editing text.
+          const el = e.target as HTMLElement;
+          if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA" && !el.isContentEditable) {
+            e.preventDefault();
+            pasteImageFlow();
+          }
           return;
         }
         if (key === ".") {
