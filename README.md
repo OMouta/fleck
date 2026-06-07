@@ -10,7 +10,7 @@
   </p>
 </div>
 
-Fleck is an open-source, cross-platform raster image editor.
+Fleck is an open-source, cross-platform raster image editor built around an infinite workspace, command palette, and first-class export areas. 
 
 It provides a flexible workspace for editing images, arranging assets, and exporting specific regions of the canvas.
 
