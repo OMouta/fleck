@@ -1,3 +1,4 @@
+use crate::image_import::{self, ImageImportError, ImagePlacement, LinkedImageImport};
 use crate::layer::{self, LayerError, NewLayer};
 use crate::model::{
     BlendMode, ClippingBehavior, HistoryEntry, HistoryState, JsonValue, ObjectId, Point, Rect,
@@ -5,6 +6,8 @@ use crate::model::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -153,6 +156,7 @@ pub struct CommandDefinition {
 pub enum CommandGroup {
     Workspace,
     Layer,
+    ImageObject,
     Selection,
     Export,
     Recipe,
@@ -467,6 +471,7 @@ pub fn default_command_registry() -> Result<CommandRegistry, CommandError> {
         },
     )?;
     register_layer_commands(&mut registry)?;
+    register_image_commands(&mut registry)?;
     Ok(registry)
 }
 
@@ -495,6 +500,8 @@ pub enum CommandError {
     Validation(#[from] ValidationError),
     #[error("layer operation failed")]
     Layer(#[from] LayerError),
+    #[error("image import operation failed")]
+    Image(#[from] ImageImportError),
     #[error("invalid object id parameter `{key}`")]
     InvalidObjectId {
         key: &'static str,
@@ -809,6 +816,156 @@ fn register_layer_commands(registry: &mut CommandRegistry) -> Result<(), Command
     Ok(())
 }
 
+fn register_image_commands(registry: &mut CommandRegistry) -> Result<(), CommandError> {
+    register_image_command(
+        registry,
+        "image.import_linked",
+        "Import Linked Image",
+        "Decode a linked image file and place it as an image object.",
+        &["open image", "drag image in"],
+        None,
+        image_import_prompts(true),
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let path = PathBuf::from(invocation.parameters.required_string("path")?);
+            let bytes = fs::read(&path).map_err(ImageImportError::Io)?;
+            let decoded = image_import::decode_image_bytes(&bytes)?;
+            let asset_id = required_object_id(&invocation.parameters, "asset_id")?;
+            let object_id = required_object_id(&invocation.parameters, "object_id")?;
+            let name = invocation.parameters.required_string("name")?.to_owned();
+            let placement = image_placement_from_parameters(
+                &invocation.parameters,
+                object_id,
+                &name,
+                &decoded.metadata,
+            )?;
+            image_import::import_linked_image(
+                workspace,
+                LinkedImageImport {
+                    asset_id,
+                    name: name.clone(),
+                    path,
+                    placement,
+                },
+            )?;
+            Ok(CommandEffect::undoable(format!("Import Image {name}")))
+        },
+    )?;
+    register_image_command(
+        registry,
+        "image.import_clipboard",
+        "Import Clipboard Image",
+        "Place an image object from a clipboard-provided asset.",
+        &["paste image"],
+        Some("Ctrl+V"),
+        image_place_existing_prompts(),
+        place_existing_asset_handler("Import Clipboard Image"),
+    )?;
+    register_image_command(
+        registry,
+        "image.import_drag_drop",
+        "Import Dropped Image",
+        "Place an image object from a drag/drop-provided asset.",
+        &["drop image"],
+        None,
+        image_place_existing_prompts(),
+        place_existing_asset_handler("Import Dropped Image"),
+    )?;
+    register_image_command(
+        registry,
+        "image.place_asset",
+        "Place Image Asset",
+        "Place an existing image asset as an image object.",
+        &["new image object"],
+        None,
+        image_place_existing_prompts(),
+        place_existing_asset_handler("Place Image Asset"),
+    )?;
+    register_image_command(
+        registry,
+        "image.duplicate_object",
+        "Duplicate Image Object",
+        "Duplicate a placed image object.",
+        &["copy image object"],
+        Some("Ctrl+D"),
+        vec![
+            prompt(
+                "object_id",
+                "Image Object ID",
+                ParameterKind::ObjectId,
+                true,
+            ),
+            prompt(
+                "new_object_id",
+                "New Image Object ID",
+                ParameterKind::ObjectId,
+                true,
+            ),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let object_id = required_object_id(&invocation.parameters, "object_id")?;
+            let new_object_id = required_object_id(&invocation.parameters, "new_object_id")?;
+            image_import::duplicate_image_object(workspace, &object_id, new_object_id)?;
+            Ok(CommandEffect::undoable("Duplicate Image Object"))
+        },
+    )?;
+    register_image_command(
+        registry,
+        "image.replace_source",
+        "Replace Image Source",
+        "Replace an image object's source asset while preserving object settings.",
+        &["replace image"],
+        None,
+        vec![
+            prompt(
+                "object_id",
+                "Image Object ID",
+                ParameterKind::ObjectId,
+                true,
+            ),
+            prompt(
+                "asset_id",
+                "Replacement Asset ID",
+                ParameterKind::ObjectId,
+                true,
+            ),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let object_id = required_object_id(&invocation.parameters, "object_id")?;
+            let asset_id = required_object_id(&invocation.parameters, "asset_id")?;
+            image_import::replace_image_source(workspace, &object_id, asset_id)?;
+            Ok(CommandEffect::undoable("Replace Image Source"))
+        },
+    )?;
+    register_image_command(
+        registry,
+        "image.rasterize_object",
+        "Rasterize Image Object",
+        "Rasterize a placed image object into an editable layer.",
+        &["rasterize image"],
+        None,
+        vec![
+            prompt(
+                "object_id",
+                "Image Object ID",
+                ParameterKind::ObjectId,
+                true,
+            ),
+            prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let object_id = required_object_id(&invocation.parameters, "object_id")?;
+            let layer_id = required_object_id(&invocation.parameters, "layer_id")?;
+            image_import::rasterize_image_object(workspace, &object_id, layer_id)?;
+            Ok(CommandEffect::undoable("Rasterize Image Object"))
+        },
+    )?;
+    Ok(())
+}
+
 fn register_layer_command(
     registry: &mut CommandRegistry,
     id: &str,
@@ -835,6 +992,105 @@ fn register_layer_command(
         },
         handler,
     )
+}
+
+fn register_image_command(
+    registry: &mut CommandRegistry,
+    id: &str,
+    label: &str,
+    description: &str,
+    aliases: &[&str],
+    shortcut: Option<&str>,
+    parameter_prompts: Vec<ParameterPrompt>,
+    handler: impl Fn(&mut Workspace, &CommandInvocation, &CommandRuntime) -> CommandResult
+        + Send
+        + Sync
+        + 'static,
+) -> Result<(), CommandError> {
+    registry.register(
+        CommandDefinition {
+            id: CommandId::new(id)?,
+            label: label.to_owned(),
+            description: description.to_owned(),
+            group: CommandGroup::ImageObject,
+            aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
+            shortcut: shortcut.map(str::to_owned),
+            undoable: true,
+            parameter_prompts,
+        },
+        handler,
+    )
+}
+
+fn image_import_prompts(include_path: bool) -> Vec<ParameterPrompt> {
+    let mut prompts = image_place_existing_prompts();
+    if include_path {
+        prompts.insert(0, prompt("path", "Path", ParameterKind::String, true));
+    }
+    prompts
+}
+
+fn image_place_existing_prompts() -> Vec<ParameterPrompt> {
+    vec![
+        prompt("asset_id", "Asset ID", ParameterKind::ObjectId, true),
+        prompt(
+            "object_id",
+            "Image Object ID",
+            ParameterKind::ObjectId,
+            true,
+        ),
+        prompt("name", "Name", ParameterKind::String, true),
+        prompt("x", "X", ParameterKind::Number, false),
+        prompt("y", "Y", ParameterKind::Number, false),
+        prompt("scale_width", "Scale Width", ParameterKind::Number, false),
+        prompt("scale_height", "Scale Height", ParameterKind::Number, false),
+        prompt("rotation_degrees", "Rotation", ParameterKind::Number, false),
+        prompt("opacity", "Opacity", ParameterKind::Number, false),
+    ]
+}
+
+fn place_existing_asset_handler(
+    label: &'static str,
+) -> impl Fn(&mut Workspace, &CommandInvocation, &CommandRuntime) -> CommandResult + Send + Sync {
+    move |workspace, invocation, runtime| {
+        runtime.ensure_not_cancelled()?;
+        let asset_id = required_object_id(&invocation.parameters, "asset_id")?;
+        let object_id = required_object_id(&invocation.parameters, "object_id")?;
+        let name = invocation.parameters.required_string("name")?.to_owned();
+        let metadata = workspace
+            .assets
+            .iter()
+            .find(|asset| asset.id == asset_id)
+            .and_then(|asset| asset.image_metadata.as_ref())
+            .cloned()
+            .ok_or_else(|| ImageImportError::AssetNotFound {
+                id: asset_id.clone(),
+            })?;
+        let placement =
+            image_placement_from_parameters(&invocation.parameters, object_id, &name, &metadata)?;
+        image_import::place_existing_asset(workspace, asset_id, placement)?;
+        Ok(CommandEffect::undoable(label))
+    }
+}
+
+fn image_placement_from_parameters(
+    parameters: &CommandParameters,
+    object_id: ObjectId,
+    name: &str,
+    metadata: &crate::model::ImageAssetMetadata,
+) -> Result<ImagePlacement, CommandError> {
+    let mut placement = ImagePlacement::new(object_id, name.to_owned(), metadata);
+    placement.position = Point {
+        x: parameters.optional_f32("x", 0.0)?,
+        y: parameters.optional_f32("y", 0.0)?,
+    };
+    placement.scale = crate::model::Size {
+        width: parameters.optional_f32("scale_width", metadata.width as f32)?,
+        height: parameters.optional_f32("scale_height", metadata.height as f32)?,
+    };
+    placement.rotation_degrees = parameters.optional_f32("rotation_degrees", 0.0)?;
+    placement.opacity = parameters.optional_f32("opacity", 1.0)?;
+    Ok(placement)
 }
 
 fn register_bool_layer_command(
@@ -981,7 +1237,9 @@ fn history_from_entries(entries: &[UndoEntry], current_index: Option<usize>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Workspace;
+    use crate::model::{Asset, AssetSource, ImageAssetMetadata, ImageFormat, Workspace};
+    use image::{ImageBuffer, ImageFormat as CrateImageFormat, Rgba};
+    use std::io::Cursor;
 
     #[test]
     fn registry_lists_command_definitions() {
@@ -999,6 +1257,11 @@ mod tests {
         assert!(definitions
             .iter()
             .any(|definition| definition.id.as_str() == "layer.flatten"));
+        assert!(definitions.iter().any(|definition| {
+            definition.id.as_str() == "image.import_linked"
+                && definition.group == CommandGroup::ImageObject
+                && definition.undoable
+        }));
     }
 
     #[test]
@@ -1226,6 +1489,129 @@ mod tests {
         assert_eq!(workspace.layers[0].name, "Locked");
     }
 
+    #[test]
+    fn image_import_command_is_undoable() {
+        let registry = default_command_registry().expect("registry");
+        let mut engine = CommandEngine::new();
+        let mut workspace = Workspace::empty(id("workspace"));
+        let path = temp_png_path();
+
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "image.import_linked",
+                    vec![
+                        (
+                            "path",
+                            JsonValue::String(path.to_string_lossy().into_owned()),
+                        ),
+                        ("asset_id", JsonValue::String("asset".to_owned())),
+                        ("object_id", JsonValue::String("object".to_owned())),
+                        ("name", JsonValue::String("Imported".to_owned())),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("import image");
+
+        assert_eq!(workspace.assets.len(), 1);
+        assert_eq!(workspace.image_objects.len(), 1);
+        assert_eq!(
+            workspace.assets[0]
+                .image_metadata
+                .as_ref()
+                .map(|metadata| (metadata.width, metadata.height)),
+            Some((2, 1))
+        );
+
+        engine.undo(&mut workspace).expect("undo import");
+        assert!(workspace.assets.is_empty());
+        assert!(workspace.image_objects.is_empty());
+    }
+
+    #[test]
+    fn image_object_commands_replace_duplicate_and_rasterize() {
+        let registry = default_command_registry().expect("registry");
+        let mut engine = CommandEngine::new();
+        let mut workspace = Workspace::empty(id("workspace"));
+        workspace.assets.push(asset("asset-a"));
+        workspace.assets.push(asset("asset-b"));
+
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "image.place_asset",
+                    vec![
+                        ("asset_id", JsonValue::String("asset-a".to_owned())),
+                        ("object_id", JsonValue::String("object".to_owned())),
+                        ("name", JsonValue::String("Placed".to_owned())),
+                        ("x", JsonValue::Number(4.0)),
+                        ("y", JsonValue::Number(5.0)),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("place");
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "image.duplicate_object",
+                    vec![
+                        ("object_id", JsonValue::String("object".to_owned())),
+                        ("new_object_id", JsonValue::String("copy".to_owned())),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("duplicate");
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "image.replace_source",
+                    vec![
+                        ("object_id", JsonValue::String("object".to_owned())),
+                        ("asset_id", JsonValue::String("asset-b".to_owned())),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("replace");
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "image.rasterize_object",
+                    vec![
+                        ("object_id", JsonValue::String("object".to_owned())),
+                        ("layer_id", JsonValue::String("layer".to_owned())),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("rasterize");
+
+        assert_eq!(workspace.image_objects.len(), 2);
+        assert_eq!(workspace.layers.len(), 1);
+        assert_eq!(workspace.image_objects[0].source_asset_id, id("asset-b"));
+        assert_eq!(
+            workspace.image_objects[0].position,
+            Point { x: 4.0, y: 5.0 }
+        );
+
+        engine.undo(&mut workspace).expect("undo rasterize");
+        assert!(workspace.layers.is_empty());
+        assert_eq!(workspace.image_objects[0].rasterized_layer_id, None);
+    }
+
     fn rename_invocation(name: &str) -> CommandInvocation {
         CommandInvocation {
             id: CommandId::new("workspace.rename").expect("command id"),
@@ -1251,5 +1637,49 @@ mod tests {
 
     fn id(value: &str) -> ObjectId {
         ObjectId::new(value).expect("test id should be valid")
+    }
+
+    fn asset(value: &str) -> Asset {
+        Asset {
+            id: id(value),
+            name: format!("{value}.png"),
+            source: AssetSource::Embedded { digest: None },
+            media_type: Some("image/png".to_owned()),
+            color_profile: None,
+            image_metadata: Some(ImageAssetMetadata {
+                width: 2,
+                height: 1,
+                format: Some(ImageFormat::Png),
+                color_type: "Rgba8".to_owned(),
+                has_alpha: true,
+            }),
+        }
+    }
+
+    fn temp_png_path() -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "fleck-command-import-{}.png",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        std::fs::write(&path, png_bytes()).expect("write png");
+        path
+    }
+
+    fn png_bytes() -> Vec<u8> {
+        let image = ImageBuffer::<Rgba<u8>, Vec<u8>>::from_fn(2, 1, |x, _| {
+            if x == 0 {
+                Rgba([255, 0, 0, 255])
+            } else {
+                Rgba([0, 0, 255, 128])
+            }
+        });
+        let mut bytes = Cursor::new(Vec::new());
+        image
+            .write_to(&mut bytes, CrateImageFormat::Png)
+            .expect("encode png");
+        bytes.into_inner()
     }
 }

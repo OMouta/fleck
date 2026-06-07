@@ -373,6 +373,17 @@ pub struct Asset {
     pub source: AssetSource,
     pub media_type: Option<String>,
     pub color_profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_metadata: Option<ImageAssetMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageAssetMetadata {
+    pub width: u32,
+    pub height: u32,
+    pub format: Option<ImageFormat>,
+    pub color_type: String,
+    pub has_alpha: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -595,6 +606,19 @@ pub enum OutputFormat {
     Icns,
     SvgRasterized,
     Pdf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageFormat {
+    Png,
+    Jpeg,
+    Gif,
+    WebP,
+    Bmp,
+    Tiff,
+    Ico,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -864,6 +888,7 @@ mod tests {
             },
             media_type: Some("image/png".to_owned()),
             color_profile: Some("sRGB".to_owned()),
+            image_metadata: None,
         });
         workspace.layers.push(layer("layer-logo"));
         workspace.image_objects.push(ImageObject {

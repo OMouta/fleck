@@ -265,7 +265,7 @@ Acceptance criteria:
 
 ### TASK-008: Implement Image Import And Image Objects
 
-Status: open
+Status: done
 
 Requirements: REQ-007, REQ-012, REQ-047, REQ-050
 

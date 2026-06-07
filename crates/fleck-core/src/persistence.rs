@@ -434,6 +434,7 @@ mod tests {
                 source,
                 media_type: Some("image/png".to_owned()),
                 color_profile: None,
+                image_metadata: None,
             }],
             object_groups: Vec::new(),
             history: HistoryState::default(),

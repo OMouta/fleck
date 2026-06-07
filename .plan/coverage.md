@@ -215,3 +215,25 @@ Evidence:
 Known gaps:
 - Raster layer operations currently operate on layer metadata and preview bounds. Real decoded pixel buffers, pixel-level trim, and destructive pixel compositing remain deferred to image import and pixel-editing tasks.
 - Frontend layer list, inspector controls, and context menus remain with TASK-FE-005.
+
+### TASK-008
+
+Status: done
+
+Evidence:
+- Added Rust-native image decoding through the `image` crate in `crates/fleck-core/src/image_import.rs`.
+- Added decoded image metadata capture for dimensions, format, color type, and alpha.
+- Added persistent `ImageAssetMetadata` and `ImageFormat` model fields for imported assets.
+- Added embedded image import into `WorkspacePackage` with embedded asset blob storage.
+- Added linked image import with source path tracking.
+- Added placed image object creation with source asset, position, scale, rotation, opacity, crop bounds, rasterized layer link, and export inclusion.
+- Added image object duplication, source replacement, reveal-linked-path helper, linked asset collection helper, and rasterization into an editable layer.
+- Registered undoable command hooks for `image.import_linked`, `image.import_clipboard`, `image.import_drag_drop`, `image.place_asset`, `image.duplicate_object`, `image.replace_source`, and `image.rasterize_object`.
+- Added tests for decode metadata/pixels, embedded package import, linked import, replacement preserving object settings, duplication, rasterization, command undo, and command registry exposure.
+- Verified `cargo test -p fleck-core`.
+- Verified `cargo fmt --all`.
+- Verified `cargo test --workspace`.
+
+Known gaps:
+- Clipboard and drag/drop byte acquisition remain frontend/Tauri responsibilities in TASK-FE-006; TASK-008 provides command/API hooks for those flows.
+- Rasterization currently creates an editable layer with correct object-derived bounds and linkage, but destructive pixel-buffer transfer remains deferred to later pixel-editing/export work.
