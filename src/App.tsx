@@ -7,7 +7,9 @@ import { StatusBar } from "@/components/fleck/status-bar";
 import { CommandPalette } from "@/components/fleck/command-palette";
 import { WorkspaceDialogs } from "@/components/fleck/workspace-dialogs";
 import { TOOLS } from "@/lib/fleck-data";
-import { pasteImageFlow } from "@/lib/image-import";
+import { openImageFlow, pasteImageFlow } from "@/lib/image-import";
+import { api } from "@/lib/api";
+import { isMacDesktopShell } from "@/lib/window";
 import { useUIStore } from "@/store/ui-store";
 import { useWorkspaceFilesStore } from "@/store/workspace-files-store";
 import { useCommandStore } from "@/store/command-store";
@@ -16,10 +18,75 @@ function App() {
   const paletteOpen = useUIStore((s) => s.paletteOpen);
   const togglePalette = useUIStore((s) => s.togglePalette);
   const setActiveTool = useUIStore((s) => s.setActiveTool);
+  const isMacDesktop = isMacDesktopShell();
+
+  useEffect(() => {
+    if (!isMacDesktop) return;
+
+    let mounted = true;
+    let unlisten: (() => void) | undefined;
+    import("@tauri-apps/api/event").then(({ listen }) => {
+      listen<string>("fleck://native-menu", ({ payload }) => {
+        const files = useWorkspaceFilesStore.getState();
+        const commands = useCommandStore.getState();
+
+        switch (payload) {
+          case "new-workspace":
+            files.newWorkspace();
+            break;
+          case "open-workspace":
+            files.openWorkspace();
+            break;
+          case "open-image":
+            openImageFlow();
+            break;
+          case "paste-image":
+            pasteImageFlow();
+            break;
+          case "save-workspace":
+            files.save();
+            break;
+          case "save-as":
+            files.saveAs();
+            break;
+          case "export-all":
+            api.exportAll();
+            break;
+          case "share-workspace":
+            api.runCommand("share-workspace");
+            break;
+          case "undo":
+            commands.undo();
+            break;
+          case "redo":
+            commands.redo();
+            break;
+          case "repeat-last-command":
+            commands.repeatLast();
+            break;
+          case "command-palette":
+            useUIStore.getState().setPaletteOpen(true);
+            break;
+        }
+      }).then((fn) => {
+        if (mounted) unlisten = fn;
+        else fn();
+      });
+    });
+
+    return () => {
+      mounted = false;
+      unlisten?.();
+    };
+  }, [isMacDesktop]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
+
+      const key = e.key.toLowerCase();
+
+      if (isMacDesktop && e.metaKey && key !== "v") return;
 
       if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -31,7 +98,6 @@ function App() {
       if (mod) {
         const files = useWorkspaceFilesStore.getState();
         const commands = useCommandStore.getState();
-        const key = e.key.toLowerCase();
         if (key === "o") {
           e.preventDefault();
           files.openWorkspace();
@@ -85,11 +151,11 @@ function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [paletteOpen, togglePalette, setActiveTool]);
+  }, [isMacDesktop, paletteOpen, togglePalette, setActiveTool]);
 
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
-      <MenuBar />
+      <MenuBar isMacDesktop={isMacDesktop} />
       <div className="flex flex-1 overflow-hidden">
         <ToolStrip />
         <Canvas />

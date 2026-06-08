@@ -9,6 +9,11 @@ export function isTauri(): boolean {
   return typeof globalThis !== "undefined" && "__TAURI_INTERNALS__" in globalThis;
 }
 
+export function isMacDesktopShell(): boolean {
+  if (!isTauri()) return false;
+  return /\bMacintosh\b|\bMac OS X\b/.test(navigator.userAgent);
+}
+
 async function currentWindow() {
   const { getCurrentWindow } = await import("@tauri-apps/api/window");
   return getCurrentWindow();

@@ -24,7 +24,7 @@ function FleckMark() {
   );
 }
 
-export function MenuBar() {
+export function MenuBar({ isMacDesktop = false }: { isMacDesktop?: boolean }) {
   const setPaletteOpen = useUIStore((s) => s.setPaletteOpen);
   const { data: meta } = useWorkspaceMeta();
   const { data: history } = useHistory();
@@ -43,22 +43,27 @@ export function MenuBar() {
       className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-sidebar px-3"
     >
       <div className="flex items-center gap-3">
+        {isMacDesktop && <div className="w-[72px] shrink-0" aria-hidden="true" />}
         <div className="flex items-center gap-2">
           <FleckMark />
           <span className="text-sm font-semibold tracking-tight">Fleck</span>
         </div>
-        <div className="h-4 w-px bg-border" />
-        <nav className="hidden items-center gap-0.5 md:flex" aria-label="Main menu">
-          <FileMenu />
-          {["Edit", "Layer", "Select", "Export", "View"].map((item) => (
-            <button
-              key={item}
-              className="rounded-md px-2.5 py-1 text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            >
-              {item}
-            </button>
-          ))}
-        </nav>
+        {!isMacDesktop && (
+          <>
+            <div className="h-4 w-px bg-border" />
+            <nav className="hidden items-center gap-0.5 md:flex" aria-label="Main menu">
+              <FileMenu />
+              {["Edit", "Layer", "Select", "Export", "View"].map((item) => (
+                <button
+                  key={item}
+                  className="rounded-md px-2.5 py-1 text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  {item}
+                </button>
+              ))}
+            </nav>
+          </>
+        )}
       </div>
 
       <div data-tauri-drag-region="" className="flex flex-1 items-center justify-center gap-2">
@@ -104,7 +109,7 @@ export function MenuBar() {
           Export all
         </button>
 
-        <WindowControls />
+        {!isMacDesktop && <WindowControls />}
       </div>
     </header>
   );
