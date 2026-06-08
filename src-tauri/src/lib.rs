@@ -50,10 +50,16 @@ mod tests {
     }
 
     fn bridge_commands(source: &str) -> BTreeSet<&str> {
+        // Frontend invokes Tauri commands via `call<T>("name", …)` or `call("name", …)`.
         source
-            .match_indices("bridge(\"")
-            .filter_map(|(index, marker)| {
-                let start = index + marker.len();
+            .match_indices("call(\"")
+            .map(|(index, marker)| index + marker.len())
+            .chain(
+                source
+                    .match_indices("call<")
+                    .filter_map(|(index, _)| source[index..].find('"').map(|offset| index + offset + 1)),
+            )
+            .filter_map(|start| {
                 let rest = &source[start..];
                 let end = rest.find('"')?;
                 Some(&rest[..end])
