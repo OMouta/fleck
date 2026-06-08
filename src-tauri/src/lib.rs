@@ -1,9 +1,11 @@
 mod desktop_commands;
 
+use tauri::Manager;
+
 #[cfg(target_os = "macos")]
 use tauri::{
     menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
-    Emitter, Manager, TitleBarStyle,
+    Emitter, TitleBarStyle,
 };
 
 #[tauri::command]
