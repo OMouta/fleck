@@ -10,6 +10,7 @@ pub mod image_import;
 pub mod layer;
 pub mod model;
 pub mod persistence;
+pub mod selection;
 
 pub const APP_NAME: &str = "Fleck";
 

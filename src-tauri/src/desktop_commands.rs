@@ -603,10 +603,7 @@ pub fn reveal_image_source(
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn relink_asset(
-    state: tauri::State<'_, DesktopState>,
-    asset_id: String,
-) -> Result<(), String> {
+pub fn relink_asset(state: tauri::State<'_, DesktopState>, asset_id: String) -> Result<(), String> {
     let Some(new_path) = rfd::FileDialog::new()
         .add_filter(
             "Images",
@@ -1510,9 +1507,12 @@ fn register_acquired_asset(
 }
 
 fn encode_rgba_to_png(image: &ImageData<'_>) -> Result<Vec<u8>, String> {
-    let buffer: ImageBuffer<Rgba<u8>, Vec<u8>> =
-        ImageBuffer::from_raw(image.width as u32, image.height as u32, image.bytes.to_vec())
-            .ok_or_else(|| "clipboard image had unexpected byte length".to_owned())?;
+    let buffer: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(
+        image.width as u32,
+        image.height as u32,
+        image.bytes.to_vec(),
+    )
+    .ok_or_else(|| "clipboard image had unexpected byte length".to_owned())?;
     let mut encoded = Vec::with_capacity(image.bytes.len());
     buffer
         .write_to(&mut Cursor::new(&mut encoded), image::ImageFormat::Png)

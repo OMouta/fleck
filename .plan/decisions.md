@@ -36,6 +36,11 @@ Source: `.plan/spec.md`
   - Reason: `fleck-core` (TASK-008) registered only import/place/duplicate/replace/rasterize image commands — there is no `image.set_position/scale/rotation/opacity/crop` or `image.delete_object` command to call, and adding core commands is out of scope for a frontend task.
   - Resolution path: add image-object transform/opacity/crop/delete commands to the core, then make the inspector fields editable through them (a follow-up core task). Tracked as partial coverage for REQ-039.
 
+- DEC-011-selection-pixel-buffer: TASK-011 implements selection mask state, geometry operations, undoable command hooks, and conversion/export bounds, but destructive selected-pixel operations are metadata-only until raster layers carry editable pixel buffers.
+  - Affected requirements: REQ-008 (delete/copy/move selected pixels), REQ-016 (pixel movement).
+  - Reason: the current `Layer` model stores layer bounds and preview metadata, not per-layer pixel buffers. Writing true selected-pixel deletion, copy payloads, or move extraction here would require inventing the pixel editing substrate that TASK-012 owns.
+  - Resolution path: TASK-012 should apply `SelectionMask` alpha data to real layer pixels for delete, copy, move/nudge/duplicate, paste-into-selection, and transform operations. TASK-011 command IDs and mask data are the integration points.
+
 ## Environment Gaps
 
 - ENV-001: Resolved. Local Rust verification was initially blocked because `rustc` and `cargo` were not installed in the current shell.

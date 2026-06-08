@@ -4,8 +4,10 @@ use crate::layer::{self, LayerError, NewLayer};
 use crate::model::{
     BlendMode, ClippingBehavior, CompressionSettings, ExportBackground, ExportParticipation,
     HistoryEntry, HistoryState, JsonValue, MetadataBehavior, ObjectId, OutputFormat, Padding,
-    Point, Rect, TransparencyBehavior, TrimBehavior, ValidationError, Workspace,
+    Point, Rect, RgbaColor, SelectionKind, TransparencyBehavior, TrimBehavior, ValidationError,
+    Workspace,
 };
+use crate::selection::{self, NewSelection, SelectionError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -474,6 +476,7 @@ pub fn default_command_registry() -> Result<CommandRegistry, CommandError> {
     )?;
     register_layer_commands(&mut registry)?;
     register_image_commands(&mut registry)?;
+    register_selection_commands(&mut registry)?;
     register_export_commands(&mut registry)?;
     Ok(registry)
 }
@@ -507,6 +510,8 @@ pub enum CommandError {
     Image(#[from] ImageImportError),
     #[error("export operation failed")]
     Export(#[from] ExportError),
+    #[error("selection operation failed")]
+    Selection(#[from] SelectionError),
     #[error("invalid object id parameter `{key}`")]
     InvalidObjectId {
         key: &'static str,
@@ -971,6 +976,366 @@ fn register_image_commands(registry: &mut CommandRegistry) -> Result<(), Command
     Ok(())
 }
 
+fn register_selection_commands(registry: &mut CommandRegistry) -> Result<(), CommandError> {
+    let shape_prompts = vec![
+        prompt("id", "Selection ID", ParameterKind::ObjectId, true),
+        prompt("x", "X", ParameterKind::Number, true),
+        prompt("y", "Y", ParameterKind::Number, true),
+        prompt("width", "Width", ParameterKind::Number, true),
+        prompt("height", "Height", ParameterKind::Number, true),
+    ];
+
+    register_selection_command(
+        registry,
+        "selection.rect",
+        "Rectangular Selection",
+        "Create a rectangular selection mask.",
+        &["rectangle select", "select rectangle"],
+        None,
+        shape_prompts.clone(),
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            create_selection_from_bounds(workspace, invocation, SelectionKind::Rectangular)?;
+            Ok(CommandEffect::undoable("Create Rectangular Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.ellipse",
+        "Elliptical Selection",
+        "Create an elliptical selection mask.",
+        &["ellipse select", "select ellipse"],
+        None,
+        shape_prompts.clone(),
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            create_selection_from_bounds(workspace, invocation, SelectionKind::Elliptical)?;
+            Ok(CommandEffect::undoable("Create Elliptical Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.lasso",
+        "Lasso Selection",
+        "Create a lasso selection from polygon points.",
+        &["freehand selection"],
+        None,
+        vec![
+            prompt("id", "Selection ID", ParameterKind::ObjectId, true),
+            prompt("points", "Points", ParameterKind::String, true),
+        ],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let points = points_parameter(&invocation.parameters, "points")?;
+            let bounds = selection::polygon_bounds(&points)?;
+            selection::create_selection(
+                workspace,
+                NewSelection {
+                    id: required_object_id(&invocation.parameters, "id")?,
+                    kind: SelectionKind::Lasso,
+                    bounds,
+                    source_layer_ids: source_layer_ids(workspace, invocation)?,
+                },
+            )?;
+            Ok(CommandEffect::undoable("Create Lasso Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.polygon",
+        "Polygon Selection",
+        "Create a polygon selection from points.",
+        &["polygon select"],
+        None,
+        vec![
+            prompt("id", "Selection ID", ParameterKind::ObjectId, true),
+            prompt("points", "Points", ParameterKind::String, true),
+        ],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let points = points_parameter(&invocation.parameters, "points")?;
+            let bounds = selection::polygon_bounds(&points)?;
+            selection::create_selection(
+                workspace,
+                NewSelection {
+                    id: required_object_id(&invocation.parameters, "id")?,
+                    kind: SelectionKind::Polygon { points },
+                    bounds,
+                    source_layer_ids: source_layer_ids(workspace, invocation)?,
+                },
+            )?;
+            Ok(CommandEffect::undoable("Create Polygon Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.magic_wand",
+        "Magic Wand Selection",
+        "Create a tolerance-based selection from a sampled point.",
+        &["wand select"],
+        None,
+        shape_prompts.clone(),
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            create_selection_from_bounds(
+                workspace,
+                invocation,
+                SelectionKind::MagicWand {
+                    tolerance: invocation
+                        .parameters
+                        .optional_f32("tolerance", 0.1)?
+                        .clamp(0.0, 1.0),
+                },
+            )?;
+            Ok(CommandEffect::undoable("Create Magic Wand Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.color_range",
+        "Color Range Selection",
+        "Create a color-range selection mask.",
+        &["select color"],
+        None,
+        shape_prompts,
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let color = RgbaColor {
+                r: optional_u8(&invocation.parameters, "r")?.unwrap_or(0),
+                g: optional_u8(&invocation.parameters, "g")?.unwrap_or(0),
+                b: optional_u8(&invocation.parameters, "b")?.unwrap_or(0),
+                a: optional_u8(&invocation.parameters, "a")?.unwrap_or(255),
+            };
+            create_selection_from_bounds(
+                workspace,
+                invocation,
+                selection::color_range_kind(
+                    color,
+                    invocation.parameters.optional_f32("tolerance", 0.1)?,
+                ),
+            )?;
+            Ok(CommandEffect::undoable("Create Color Range Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.expand",
+        "Expand Selection",
+        "Expand a selection mask.",
+        &["grow selection"],
+        None,
+        vec![
+            prompt("id", "Selection ID", ParameterKind::ObjectId, true),
+            prompt("amount", "Amount", ParameterKind::Number, true),
+        ],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            selection::expand_selection(
+                workspace,
+                &required_object_id(&invocation.parameters, "id")?,
+                required_f32(&invocation.parameters, "amount")?,
+            )?;
+            Ok(CommandEffect::undoable("Expand Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.contract",
+        "Contract Selection",
+        "Contract a selection mask.",
+        &["shrink selection"],
+        None,
+        vec![
+            prompt("id", "Selection ID", ParameterKind::ObjectId, true),
+            prompt("amount", "Amount", ParameterKind::Number, true),
+        ],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            selection::contract_selection(
+                workspace,
+                &required_object_id(&invocation.parameters, "id")?,
+                required_f32(&invocation.parameters, "amount")?,
+            )?;
+            Ok(CommandEffect::undoable("Contract Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.feather",
+        "Feather Selection",
+        "Feather selection mask alpha.",
+        &["soften selection"],
+        None,
+        vec![
+            prompt("id", "Selection ID", ParameterKind::ObjectId, true),
+            prompt("radius", "Radius", ParameterKind::Number, true),
+        ],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            selection::feather_selection(
+                workspace,
+                &required_object_id(&invocation.parameters, "id")?,
+                required_f32(&invocation.parameters, "radius")?,
+            )?;
+            Ok(CommandEffect::undoable("Feather Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.invert",
+        "Invert Selection",
+        "Invert selection mask alpha.",
+        &["inverse selection"],
+        None,
+        vec![prompt("id", "Selection ID", ParameterKind::ObjectId, true)],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            selection::invert_selection(
+                workspace,
+                &required_object_id(&invocation.parameters, "id")?,
+            )?;
+            Ok(CommandEffect::undoable("Invert Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.move",
+        "Move Selection",
+        "Move a selection mask.",
+        &["nudge selection"],
+        None,
+        vec![
+            prompt("id", "Selection ID", ParameterKind::ObjectId, true),
+            prompt("dx", "Delta X", ParameterKind::Number, true),
+            prompt("dy", "Delta Y", ParameterKind::Number, true),
+        ],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            selection::move_selection(
+                workspace,
+                &required_object_id(&invocation.parameters, "id")?,
+                required_f32(&invocation.parameters, "dx")?,
+                required_f32(&invocation.parameters, "dy")?,
+            )?;
+            Ok(CommandEffect::undoable("Move Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.delete",
+        "Delete Selection",
+        "Delete the active selection mask.",
+        &["clear selection"],
+        Some("Delete"),
+        vec![prompt("id", "Selection ID", ParameterKind::ObjectId, true)],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            selection::delete_selection(
+                workspace,
+                &required_object_id(&invocation.parameters, "id")?,
+            )?;
+            Ok(CommandEffect::undoable("Delete Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.copy",
+        "Copy Selection",
+        "Copy selection bounds and mask data for native clipboard routing.",
+        &["copy selected pixels"],
+        Some("Ctrl+C"),
+        vec![prompt("id", "Selection ID", ParameterKind::ObjectId, true)],
+        false,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            selection::copy_selection(
+                workspace,
+                &required_object_id(&invocation.parameters, "id")?,
+            )?;
+            Ok(CommandEffect::undoable("Copy Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.layer_from_selection",
+        "Layer From Selection",
+        "Create a raster layer from selection bounds.",
+        &["move selection to new layer"],
+        None,
+        vec![
+            prompt("id", "Selection ID", ParameterKind::ObjectId, true),
+            prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("name", "Name", ParameterKind::String, true),
+        ],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            selection::layer_from_selection(
+                workspace,
+                &required_object_id(&invocation.parameters, "id")?,
+                required_object_id(&invocation.parameters, "layer_id")?,
+                invocation.parameters.required_string("name")?.to_owned(),
+            )?;
+            Ok(CommandEffect::undoable("Create Layer From Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.export_area_from_selection",
+        "Export Area From Selection",
+        "Create an export area from selection bounds.",
+        &["create export area from selection"],
+        None,
+        vec![
+            prompt("id", "Selection ID", ParameterKind::ObjectId, true),
+            prompt("area_id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("name", "Name", ParameterKind::String, true),
+        ],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            selection::export_area_from_selection(
+                workspace,
+                &required_object_id(&invocation.parameters, "id")?,
+                required_object_id(&invocation.parameters, "area_id")?,
+                invocation.parameters.required_string("name")?.to_owned(),
+            )?;
+            Ok(CommandEffect::undoable("Create Export Area From Selection"))
+        },
+    )?;
+    register_selection_command(
+        registry,
+        "selection.direct_export",
+        "Export Selection",
+        "Prepare the active selection for direct export.",
+        &["export selected area"],
+        None,
+        vec![prompt("id", "Selection ID", ParameterKind::ObjectId, true)],
+        false,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            selection::copy_selection(
+                workspace,
+                &required_object_id(&invocation.parameters, "id")?,
+            )?;
+            Ok(CommandEffect::undoable("Export Selection"))
+        },
+    )?;
+    Ok(())
+}
+
 fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), CommandError> {
     register_export_command(
         registry,
@@ -1422,6 +1787,35 @@ fn register_export_command(
     )
 }
 
+fn register_selection_command(
+    registry: &mut CommandRegistry,
+    id: &str,
+    label: &str,
+    description: &str,
+    aliases: &[&str],
+    shortcut: Option<&str>,
+    parameter_prompts: Vec<ParameterPrompt>,
+    undoable: bool,
+    handler: impl Fn(&mut Workspace, &CommandInvocation, &CommandRuntime) -> CommandResult
+        + Send
+        + Sync
+        + 'static,
+) -> Result<(), CommandError> {
+    registry.register(
+        CommandDefinition {
+            id: CommandId::new(id)?,
+            label: label.to_owned(),
+            description: description.to_owned(),
+            group: CommandGroup::Selection,
+            aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
+            shortcut: shortcut.map(str::to_owned),
+            undoable,
+            parameter_prompts,
+        },
+        handler,
+    )
+}
+
 fn register_image_command(
     registry: &mut CommandRegistry,
     id: &str,
@@ -1519,6 +1913,116 @@ fn image_placement_from_parameters(
     placement.rotation_degrees = parameters.optional_f32("rotation_degrees", 0.0)?;
     placement.opacity = parameters.optional_f32("opacity", 1.0)?;
     Ok(placement)
+}
+
+fn create_selection_from_bounds(
+    workspace: &mut Workspace,
+    invocation: &CommandInvocation,
+    kind: SelectionKind,
+) -> Result<(), CommandError> {
+    selection::create_selection(
+        workspace,
+        NewSelection {
+            id: required_object_id(&invocation.parameters, "id")?,
+            kind,
+            bounds: Rect {
+                x: required_f32(&invocation.parameters, "x")?,
+                y: required_f32(&invocation.parameters, "y")?,
+                width: required_f32(&invocation.parameters, "width")?,
+                height: required_f32(&invocation.parameters, "height")?,
+            },
+            source_layer_ids: source_layer_ids(workspace, invocation)?,
+        },
+    )?;
+    Ok(())
+}
+
+fn source_layer_ids(
+    workspace: &Workspace,
+    invocation: &CommandInvocation,
+) -> Result<Vec<ObjectId>, CommandError> {
+    let mut ids = object_id_array_parameter(&invocation.parameters, "source_layer_ids")?;
+    if ids.is_empty() {
+        if let Some(id) = &invocation.context.selected_layer_id {
+            ids.push(id.clone());
+        }
+    }
+    if ids.is_empty() {
+        ids.extend(
+            workspace
+                .layers
+                .iter()
+                .filter(|layer| layer.visible && layer.opacity > 0.0)
+                .map(|layer| layer.id.clone()),
+        );
+    }
+    Ok(ids)
+}
+
+fn object_id_array_parameter(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<Vec<ObjectId>, CommandError> {
+    match parameters.get(key) {
+        Some(JsonValue::Array(values)) => values
+            .iter()
+            .map(|value| match value {
+                JsonValue::String(id) => ObjectId::new(id.clone())
+                    .map_err(|issue| CommandError::InvalidObjectId { key, issue }),
+                _ => Err(CommandError::InvalidParameter {
+                    key,
+                    expected: "array of object id strings",
+                }),
+            })
+            .collect(),
+        Some(JsonValue::Null) | None => Ok(Vec::new()),
+        Some(_) => Err(CommandError::InvalidParameter {
+            key,
+            expected: "array of object id strings",
+        }),
+    }
+}
+
+fn points_parameter(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<Vec<Point>, CommandError> {
+    match parameters.get(key) {
+        Some(JsonValue::Array(values)) => values.iter().map(point_parameter).collect(),
+        Some(_) => Err(CommandError::InvalidParameter {
+            key,
+            expected: "array of point objects",
+        }),
+        None => Err(CommandError::MissingParameter { key }),
+    }
+}
+
+fn point_parameter(value: &JsonValue) -> Result<Point, CommandError> {
+    match value {
+        JsonValue::Object(fields) => {
+            let x = json_number_field(fields, "x")?;
+            let y = json_number_field(fields, "y")?;
+            Ok(Point { x, y })
+        }
+        _ => Err(CommandError::InvalidParameter {
+            key: "points",
+            expected: "array of point objects",
+        }),
+    }
+}
+
+fn json_number_field(
+    fields: &BTreeMap<String, JsonValue>,
+    key: &'static str,
+) -> Result<f32, CommandError> {
+    match fields.get(key) {
+        Some(JsonValue::Number(value)) if value.is_finite() => Ok(*value as f32),
+        Some(_) => Err(CommandError::InvalidParameter {
+            key,
+            expected: "finite number",
+        }),
+        None => Err(CommandError::MissingParameter { key }),
+    }
 }
 
 fn output_prompts(require_fields: bool) -> Vec<ParameterPrompt> {
@@ -1962,6 +2466,16 @@ mod tests {
                 && definition.group == CommandGroup::ImageObject
                 && definition.undoable
         }));
+        assert!(definitions.iter().any(|definition| {
+            definition.id.as_str() == "selection.rect"
+                && definition.group == CommandGroup::Selection
+                && definition.undoable
+        }));
+        assert!(definitions.iter().any(|definition| {
+            definition.id.as_str() == "selection.direct_export"
+                && definition.group == CommandGroup::Selection
+                && !definition.undoable
+        }));
     }
 
     #[test]
@@ -2378,6 +2892,95 @@ mod tests {
 
         engine.undo(&mut workspace).expect("undo output");
         assert!(workspace.outputs.is_empty());
+    }
+
+    #[test]
+    fn selection_commands_create_convert_and_undo() {
+        let registry = default_command_registry().expect("registry");
+        let mut engine = CommandEngine::new();
+        let mut workspace = Workspace::empty(id("workspace"));
+
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "layer.create",
+                    vec![
+                        ("id", JsonValue::String("base".to_owned())),
+                        ("name", JsonValue::String("Base".to_owned())),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("create layer");
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "selection.rect",
+                    vec![
+                        ("id", JsonValue::String("selection".to_owned())),
+                        ("x", JsonValue::Number(2.0)),
+                        ("y", JsonValue::Number(3.0)),
+                        ("width", JsonValue::Number(8.0)),
+                        ("height", JsonValue::Number(6.0)),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("selection");
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "selection.feather",
+                    vec![
+                        ("id", JsonValue::String("selection".to_owned())),
+                        ("radius", JsonValue::Number(2.0)),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("feather");
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "selection.export_area_from_selection",
+                    vec![
+                        ("id", JsonValue::String("selection".to_owned())),
+                        ("area_id", JsonValue::String("area".to_owned())),
+                        ("name", JsonValue::String("Area".to_owned())),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("area");
+
+        assert_eq!(workspace.selections.len(), 1);
+        assert_eq!(workspace.export_areas[0].bounds.width, 8.0);
+        assert!(workspace.selections[0]
+            .mask
+            .as_ref()
+            .expect("mask")
+            .alpha
+            .iter()
+            .any(|alpha| *alpha < 255));
+
+        engine.undo(&mut workspace).expect("undo area");
+        assert!(workspace.export_areas.is_empty());
+        engine.undo(&mut workspace).expect("undo feather");
+        assert!(workspace.selections[0]
+            .mask
+            .as_ref()
+            .expect("mask")
+            .alpha
+            .iter()
+            .all(|alpha| *alpha == 255));
     }
 
     fn rename_invocation(name: &str) -> CommandInvocation {

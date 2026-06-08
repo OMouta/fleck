@@ -54,11 +54,9 @@ mod tests {
         source
             .match_indices("call(\"")
             .map(|(index, marker)| index + marker.len())
-            .chain(
-                source
-                    .match_indices("call<")
-                    .filter_map(|(index, _)| source[index..].find('"').map(|offset| index + offset + 1)),
-            )
+            .chain(source.match_indices("call<").filter_map(|(index, _)| {
+                source[index..].find('"').map(|offset| index + offset + 1)
+            }))
             .filter_map(|start| {
                 let rest = &source[start..];
                 let end = rest.find('"')?;

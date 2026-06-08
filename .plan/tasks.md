@@ -391,7 +391,7 @@ Acceptance criteria:
 
 ### TASK-011: Implement Selection Engine
 
-Status: open
+Status: done
 
 Requirements: REQ-008, REQ-016, REQ-028, REQ-029
 

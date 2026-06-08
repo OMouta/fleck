@@ -1021,6 +1021,7 @@ mod tests {
             bounds: rect(0.0, 0.0, 8.0, 8.0),
             feather_radius: 0.0,
             source_layer_ids: vec![id("base")],
+            mask: None,
         });
         workspace.export_areas.push(ExportArea {
             id: id("export"),
@@ -1297,6 +1298,7 @@ mod tests {
             bounds: rect(0.0, 0.0, 8.0, 8.0),
             feather_radius: 0.0,
             source_layer_ids: Vec::new(),
+            mask: None,
         });
         workspace
     }

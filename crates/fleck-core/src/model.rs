@@ -213,6 +213,34 @@ impl Workspace {
             }
         }
 
+        for selection in &self.selections {
+            if selection.bounds.width <= 0.0 || selection.bounds.height <= 0.0 {
+                issues.push(ValidationIssue::NonPositiveBounds {
+                    object_kind: "selection",
+                    id: selection.id.clone(),
+                });
+            }
+            for layer_id in &selection.source_layer_ids {
+                require_reference(
+                    &mut issues,
+                    "selection.source_layer_ids",
+                    &selection.id,
+                    layer_id,
+                    &layer_ids,
+                );
+            }
+            if let Some(mask) = &selection.mask {
+                let expected_len = mask.width as usize * mask.height as usize;
+                if mask.alpha.len() != expected_len {
+                    issues.push(ValidationIssue::InvalidSelectionMask {
+                        selection_id: selection.id.clone(),
+                        expected_len,
+                        actual_len: mask.alpha.len(),
+                    });
+                }
+            }
+        }
+
         for output in &self.outputs {
             if output.filename.trim().is_empty() {
                 issues.push(ValidationIssue::EmptyFilename {
@@ -311,6 +339,15 @@ pub struct Selection {
     pub bounds: Rect,
     pub feather_radius: f32,
     pub source_layer_ids: Vec<ObjectId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask: Option<SelectionMask>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SelectionMask {
+    pub width: u32,
+    pub height: u32,
+    pub alpha: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -711,6 +748,14 @@ pub enum ValidationIssue {
         object_kind: &'static str,
         id: ObjectId,
     },
+    #[error(
+        "selection `{selection_id}` mask has {actual_len} alpha value(s); expected {expected_len}"
+    )]
+    InvalidSelectionMask {
+        selection_id: ObjectId,
+        expected_len: usize,
+        actual_len: usize,
+    },
     #[error("output `{output_id}` must have a filename")]
     EmptyFilename { output_id: ObjectId },
     #[error("output `{output_id}` must have positive dimensions and scale")]
@@ -912,6 +957,11 @@ mod tests {
             bounds: rect(0.0, 0.0, 64.0, 64.0),
             feather_radius: 0.0,
             source_layer_ids: vec![id("layer-logo")],
+            mask: Some(SelectionMask {
+                width: 64,
+                height: 64,
+                alpha: vec![255; 64 * 64],
+            }),
         });
         workspace.guides.push(Guide {
             id: id("guide-center"),

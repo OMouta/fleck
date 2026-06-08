@@ -286,3 +286,27 @@ Known gaps:
 - Image-object transform/opacity/crop edit and image-object delete have no core command yet (DEC-FE-006-image-transform-edit).
 - Import flows are reachable from the File menu, canvas drop, Images panel header, and ⌘V; they are not palette commands (import needs native acquisition). Palette exposes duplicate/rasterize.
 - Mock undo does not snapshot-revert (shared pre-existing limitation).
+
+### TASK-011
+
+Status: done
+
+Evidence:
+- Added `crates/fleck-core/src/selection.rs` with selection mask creation and operations for rectangular, elliptical, lasso, polygon, magic wand, color range, expand, contract, feather, invert, move, delete, copy metadata, layer-from-selection, and export-area-from-selection.
+- Extended `Selection` with an optional `SelectionMask` carrying per-pixel alpha values, preserving compatibility with existing serialized selections that do not have explicit masks.
+- Added validation for selection bounds, source-layer references, and mask alpha length in `crates/fleck-core/src/model.rs`.
+- Registered selection commands in `crates/fleck-core/src/command.rs`, including undoable selection-changing operations and non-undoable copy/direct-export preparation hooks.
+- Kept existing render/export selection paths compatible by updating render test fixtures for the optional mask field.
+- Added tests for mask alpha behavior, feather/invert/move, conversion to layer/export area, command registration, and command undo.
+- Verified `cargo fmt --all`.
+- Verified `cargo test -p fleck-core`.
+- Verified `cargo test --workspace`.
+
+Coverage impact:
+- REQ-008: selection types, expansion/contraction, feathering, inversion, movement, deletion of active selection state, copy metadata, layer creation, export area creation, and direct-export command hooks are implemented. True selected-pixel deletion/copy/move awaits pixel-buffer editing per DEC-011-selection-pixel-buffer, so REQ-008 stays partial.
+- REQ-016: selection movement hooks exist, but destructive pixel movement remains partial until TASK-012 provides editable raster pixels.
+- REQ-028 and REQ-029: selection bounds can create export areas and feed direct selection export hooks; full batch/export UI behavior remains with later export/frontend tasks.
+
+Known gaps:
+- Magic wand and color range currently build masks from provided bounds/tolerance metadata because layer pixel sampling is not available yet.
+- Copy/direct export commands validate and expose selection mask/bounds metadata, but encoded clipboard/export payload generation remains in rendering/platform integration.
