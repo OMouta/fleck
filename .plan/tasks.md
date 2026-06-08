@@ -306,7 +306,7 @@ Acceptance criteria:
 
 ### TASK-009: Implement Export Areas And Outputs
 
-Status: open
+Status: done
 
 Requirements: REQ-002, REQ-009, REQ-010, REQ-028, REQ-029, REQ-032, REQ-033
 

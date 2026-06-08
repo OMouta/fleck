@@ -1,8 +1,10 @@
+use crate::export::{self, ExportError, NewExportArea, NewOutput, OutputUpdate};
 use crate::image_import::{self, ImageImportError, ImagePlacement, LinkedImageImport};
 use crate::layer::{self, LayerError, NewLayer};
 use crate::model::{
-    BlendMode, ClippingBehavior, HistoryEntry, HistoryState, JsonValue, ObjectId, Point, Rect,
-    ValidationError, Workspace,
+    BlendMode, ClippingBehavior, CompressionSettings, ExportBackground, ExportParticipation,
+    HistoryEntry, HistoryState, JsonValue, MetadataBehavior, ObjectId, OutputFormat, Padding,
+    Point, Rect, TransparencyBehavior, TrimBehavior, ValidationError, Workspace,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -472,6 +474,7 @@ pub fn default_command_registry() -> Result<CommandRegistry, CommandError> {
     )?;
     register_layer_commands(&mut registry)?;
     register_image_commands(&mut registry)?;
+    register_export_commands(&mut registry)?;
     Ok(registry)
 }
 
@@ -502,6 +505,8 @@ pub enum CommandError {
     Layer(#[from] LayerError),
     #[error("image import operation failed")]
     Image(#[from] ImageImportError),
+    #[error("export operation failed")]
+    Export(#[from] ExportError),
     #[error("invalid object id parameter `{key}`")]
     InvalidObjectId {
         key: &'static str,
@@ -966,6 +971,351 @@ fn register_image_commands(registry: &mut CommandRegistry) -> Result<(), Command
     Ok(())
 }
 
+fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), CommandError> {
+    register_export_command(
+        registry,
+        "export_area.create",
+        "Create Export Area",
+        "Create a named export metadata region.",
+        &["new export area", "mark export area"],
+        None,
+        vec![
+            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("name", "Name", ParameterKind::String, true),
+            prompt("x", "X", ParameterKind::Number, false),
+            prompt("y", "Y", ParameterKind::Number, false),
+            prompt("width", "Width", ParameterKind::Number, true),
+            prompt("height", "Height", ParameterKind::Number, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let name = invocation.parameters.required_string("name")?.to_owned();
+            let area = NewExportArea {
+                id,
+                name: name.clone(),
+                bounds: Rect {
+                    x: invocation.parameters.optional_f32("x", 0.0)?,
+                    y: invocation.parameters.optional_f32("y", 0.0)?,
+                    width: required_f32(&invocation.parameters, "width")?,
+                    height: required_f32(&invocation.parameters, "height")?,
+                },
+                padding: Padding::default(),
+                background: ExportBackground::Transparent,
+                trim: TrimBehavior::None,
+                output_ids: Vec::new(),
+                included_layer_ids: Vec::new(),
+                excluded_layer_ids: Vec::new(),
+                tags: Vec::new(),
+                preset_id: None,
+            };
+            export::create_export_area(workspace, area)?;
+            Ok(CommandEffect::undoable(format!(
+                "Create Export Area {name}"
+            )))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "export_area.rename",
+        "Rename Export Area",
+        "Rename an export area.",
+        &["name export area"],
+        Some("F2"),
+        vec![
+            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("name", "Name", ParameterKind::String, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let name = invocation.parameters.required_string("name")?.to_owned();
+            export::rename_export_area(workspace, &id, name.clone())?;
+            Ok(CommandEffect::undoable(format!(
+                "Rename Export Area to {name}"
+            )))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "export_area.move",
+        "Move Export Area",
+        "Move an export area.",
+        &["position export area"],
+        None,
+        vec![
+            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("x", "X", ParameterKind::Number, true),
+            prompt("y", "Y", ParameterKind::Number, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let x = required_f32(&invocation.parameters, "x")?;
+            let y = required_f32(&invocation.parameters, "y")?;
+            export::move_export_area(workspace, &id, x, y)?;
+            Ok(CommandEffect::undoable("Move Export Area"))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "export_area.resize",
+        "Resize Export Area",
+        "Resize an export area.",
+        &["size export area"],
+        None,
+        vec![
+            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("width", "Width", ParameterKind::Number, true),
+            prompt("height", "Height", ParameterKind::Number, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            export::resize_export_area(
+                workspace,
+                &id,
+                required_f32(&invocation.parameters, "width")?,
+                required_f32(&invocation.parameters, "height")?,
+            )?;
+            Ok(CommandEffect::undoable("Resize Export Area"))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "export_area.duplicate",
+        "Duplicate Export Area",
+        "Duplicate an export area.",
+        &["copy export area"],
+        Some("Ctrl+D"),
+        vec![
+            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt(
+                "new_id",
+                "New Export Area ID",
+                ParameterKind::ObjectId,
+                true,
+            ),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let new_id = required_object_id(&invocation.parameters, "new_id")?;
+            export::duplicate_export_area(workspace, &id, new_id)?;
+            Ok(CommandEffect::undoable("Duplicate Export Area"))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "export_area.set_tags",
+        "Set Export Area Tags",
+        "Set comma-separated export area tags.",
+        &["tag export area"],
+        None,
+        vec![
+            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("tags", "Tags", ParameterKind::String, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let tags = invocation
+                .parameters
+                .required_string("tags")?
+                .split(',')
+                .map(str::to_owned)
+                .collect();
+            export::set_export_area_tags(workspace, &id, tags)?;
+            Ok(CommandEffect::undoable("Set Export Area Tags"))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "export_area.group",
+        "Create Export Area Group",
+        "Create a group containing an export area.",
+        &["group export area"],
+        None,
+        vec![
+            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("group_id", "Group ID", ParameterKind::ObjectId, true),
+            prompt("name", "Name", ParameterKind::String, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let group_id = required_object_id(&invocation.parameters, "group_id")?;
+            let name = invocation.parameters.required_string("name")?.to_owned();
+            export::group_export_area(workspace, &id, group_id, name.clone())?;
+            Ok(CommandEffect::undoable(format!(
+                "Create Export Area Group {name}"
+            )))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "export_area.delete",
+        "Delete Export Area",
+        "Delete an export area.",
+        &["remove export area"],
+        Some("Delete"),
+        vec![prompt(
+            "id",
+            "Export Area ID",
+            ParameterKind::ObjectId,
+            true,
+        )],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let deleted = export::delete_export_area(workspace, &id)?;
+            Ok(CommandEffect::undoable(format!(
+                "Delete Export Area {}",
+                deleted.name
+            )))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "output.add",
+        "Add Output",
+        "Add an output definition.",
+        &["new output"],
+        None,
+        output_prompts(true),
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let output = new_output_from_parameters(&invocation.parameters)?;
+            let filename = output.filename.clone();
+            export::add_output(workspace, output)?;
+            Ok(CommandEffect::undoable(format!("Add Output {filename}")))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "output.remove",
+        "Remove Output",
+        "Remove an output definition and detach it from export areas.",
+        &["delete output"],
+        Some("Delete"),
+        vec![prompt("id", "Output ID", ParameterKind::ObjectId, true)],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let removed = export::remove_output(workspace, &id)?;
+            Ok(CommandEffect::undoable(format!(
+                "Remove Output {}",
+                removed.filename
+            )))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "output.duplicate",
+        "Duplicate Output",
+        "Duplicate an output definition.",
+        &["copy output"],
+        Some("Ctrl+D"),
+        vec![
+            prompt("id", "Output ID", ParameterKind::ObjectId, true),
+            prompt("new_id", "New Output ID", ParameterKind::ObjectId, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let new_id = required_object_id(&invocation.parameters, "new_id")?;
+            export::duplicate_output(workspace, &id, new_id)?;
+            Ok(CommandEffect::undoable("Duplicate Output"))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "output.update",
+        "Update Output",
+        "Update output settings.",
+        &["edit output"],
+        None,
+        output_prompts(false),
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            export::update_output(
+                workspace,
+                &id,
+                output_update_from_parameters(&invocation.parameters)?,
+            )?;
+            Ok(CommandEffect::undoable("Update Output"))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "export_area.attach_output",
+        "Attach Output To Export Area",
+        "Attach an output definition to an export area.",
+        &["add output to export area"],
+        None,
+        vec![
+            prompt("area_id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("output_id", "Output ID", ParameterKind::ObjectId, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let area_id = required_object_id(&invocation.parameters, "area_id")?;
+            let output_id = required_object_id(&invocation.parameters, "output_id")?;
+            export::attach_output_to_area(workspace, &area_id, output_id)?;
+            Ok(CommandEffect::undoable("Attach Output To Export Area"))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "export_area.detach_output",
+        "Detach Output From Export Area",
+        "Detach an output definition from an export area.",
+        &["remove output from export area"],
+        None,
+        vec![
+            prompt("area_id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("output_id", "Output ID", ParameterKind::ObjectId, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let area_id = required_object_id(&invocation.parameters, "area_id")?;
+            let output_id = required_object_id(&invocation.parameters, "output_id")?;
+            export::detach_output_from_area(workspace, &area_id, &output_id)?;
+            Ok(CommandEffect::undoable("Detach Output From Export Area"))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "export_area.set_layer_inclusion",
+        "Set Export Area Layer Inclusion",
+        "Include, exclude, or inherit a layer for an export area.",
+        &["export layer rule"],
+        None,
+        vec![
+            prompt("area_id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt(
+                "participation",
+                "Participation",
+                ParameterKind::String,
+                true,
+            ),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let area_id = required_object_id(&invocation.parameters, "area_id")?;
+            let layer_id = required_object_id(&invocation.parameters, "layer_id")?;
+            let participation = parse_export_participation(
+                invocation.parameters.required_string("participation")?,
+            )?;
+            export::set_layer_inclusion(workspace, &area_id, layer_id, participation)?;
+            Ok(CommandEffect::undoable("Set Export Area Layer Inclusion"))
+        },
+    )?;
+    Ok(())
+}
+
 fn register_layer_command(
     registry: &mut CommandRegistry,
     id: &str,
@@ -985,6 +1335,34 @@ fn register_layer_command(
             label: label.to_owned(),
             description: description.to_owned(),
             group: CommandGroup::Layer,
+            aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
+            shortcut: shortcut.map(str::to_owned),
+            undoable: true,
+            parameter_prompts,
+        },
+        handler,
+    )
+}
+
+fn register_export_command(
+    registry: &mut CommandRegistry,
+    id: &str,
+    label: &str,
+    description: &str,
+    aliases: &[&str],
+    shortcut: Option<&str>,
+    parameter_prompts: Vec<ParameterPrompt>,
+    handler: impl Fn(&mut Workspace, &CommandInvocation, &CommandRuntime) -> CommandResult
+        + Send
+        + Sync
+        + 'static,
+) -> Result<(), CommandError> {
+    registry.register(
+        CommandDefinition {
+            id: CommandId::new(id)?,
+            label: label.to_owned(),
+            description: description.to_owned(),
+            group: CommandGroup::Export,
             aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
             shortcut: shortcut.map(str::to_owned),
             undoable: true,
@@ -1093,6 +1471,63 @@ fn image_placement_from_parameters(
     Ok(placement)
 }
 
+fn output_prompts(require_fields: bool) -> Vec<ParameterPrompt> {
+    vec![
+        prompt("id", "Output ID", ParameterKind::ObjectId, true),
+        prompt(
+            "filename",
+            "Filename",
+            ParameterKind::String,
+            require_fields,
+        ),
+        prompt("folder", "Folder", ParameterKind::String, false),
+        prompt("format", "Format", ParameterKind::String, require_fields),
+        prompt("width", "Width", ParameterKind::Number, false),
+        prompt("height", "Height", ParameterKind::Number, false),
+        prompt("scale", "Scale", ParameterKind::Number, false),
+        prompt("quality", "Quality", ParameterKind::Number, false),
+        prompt("background", "Background", ParameterKind::String, false),
+        prompt("transparency", "Transparency", ParameterKind::String, false),
+        prompt("metadata", "Metadata", ParameterKind::String, false),
+    ]
+}
+
+fn new_output_from_parameters(parameters: &CommandParameters) -> Result<NewOutput, CommandError> {
+    Ok(NewOutput {
+        id: required_object_id(parameters, "id")?,
+        filename: parameters.required_string("filename")?.to_owned(),
+        folder: parameters.optional_string("folder")?.map(str::to_owned),
+        format: parse_output_format(parameters.required_string("format")?)?,
+        width: optional_u32(parameters, "width")?,
+        height: optional_u32(parameters, "height")?,
+        scale: parameters.optional_f32("scale", 1.0)?,
+        quality: optional_u8(parameters, "quality")?,
+        compression: CompressionSettings::default(),
+        background: optional_export_background(parameters, "background")?
+            .unwrap_or(ExportBackground::Transparent),
+        transparency: optional_transparency(parameters, "transparency")?
+            .unwrap_or(TransparencyBehavior::Preserve),
+        metadata: optional_metadata(parameters, "metadata")?.unwrap_or(MetadataBehavior::Strip),
+    })
+}
+
+fn output_update_from_parameters(
+    parameters: &CommandParameters,
+) -> Result<OutputUpdate, CommandError> {
+    Ok(OutputUpdate {
+        filename: parameters.optional_string("filename")?.map(str::to_owned),
+        folder: optional_nullable_string(parameters, "folder")?,
+        format: optional_output_format(parameters, "format")?,
+        width: optional_nullable_u32(parameters, "width")?,
+        height: optional_nullable_u32(parameters, "height")?,
+        scale: optional_present_f32(parameters, "scale")?,
+        quality: optional_nullable_u8(parameters, "quality")?,
+        background: optional_export_background(parameters, "background")?,
+        transparency: optional_transparency(parameters, "transparency")?,
+        metadata: optional_metadata(parameters, "metadata")?,
+    })
+}
+
 fn register_bool_layer_command(
     registry: &mut CommandRegistry,
     id: &str,
@@ -1178,6 +1613,100 @@ fn optional_object_id(
         .transpose()
 }
 
+fn required_f32(parameters: &CommandParameters, key: &'static str) -> Result<f32, CommandError> {
+    match parameters.get(key) {
+        Some(JsonValue::Number(value)) if value.is_finite() => Ok(*value as f32),
+        Some(_) => Err(CommandError::InvalidParameter {
+            key,
+            expected: "finite number",
+        }),
+        None => Err(CommandError::MissingParameter { key }),
+    }
+}
+
+fn optional_present_f32(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<Option<f32>, CommandError> {
+    match parameters.get(key) {
+        Some(JsonValue::Number(value)) if value.is_finite() => Ok(Some(*value as f32)),
+        Some(JsonValue::Null) | None => Ok(None),
+        Some(_) => Err(CommandError::InvalidParameter {
+            key,
+            expected: "finite number or null",
+        }),
+    }
+}
+
+fn optional_u32(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<Option<u32>, CommandError> {
+    match parameters.get(key) {
+        Some(JsonValue::Number(value))
+            if value.is_finite() && *value >= 0.0 && value.fract() == 0.0 =>
+        {
+            Ok(Some(*value as u32))
+        }
+        Some(JsonValue::Null) | None => Ok(None),
+        Some(_) => Err(CommandError::InvalidParameter {
+            key,
+            expected: "non-negative integer or null",
+        }),
+    }
+}
+
+fn optional_nullable_u32(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<Option<Option<u32>>, CommandError> {
+    match parameters.get(key) {
+        Some(JsonValue::Null) => Ok(Some(None)),
+        Some(_) => optional_u32(parameters, key).map(Some),
+        None => Ok(None),
+    }
+}
+
+fn optional_u8(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<Option<u8>, CommandError> {
+    match optional_u32(parameters, key)? {
+        Some(value) if value <= u8::MAX as u32 => Ok(Some(value as u8)),
+        Some(_) => Err(CommandError::InvalidParameter {
+            key,
+            expected: "0..=255 integer or null",
+        }),
+        None => Ok(None),
+    }
+}
+
+fn optional_nullable_u8(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<Option<Option<u8>>, CommandError> {
+    match parameters.get(key) {
+        Some(JsonValue::Null) => Ok(Some(None)),
+        Some(_) => optional_u8(parameters, key).map(Some),
+        None => Ok(None),
+    }
+}
+
+fn optional_nullable_string(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<Option<Option<String>>, CommandError> {
+    match parameters.get(key) {
+        Some(JsonValue::String(value)) if !value.trim().is_empty() => Ok(Some(Some(value.clone()))),
+        Some(JsonValue::Null) => Ok(Some(None)),
+        None => Ok(None),
+        Some(_) => Err(CommandError::InvalidParameter {
+            key,
+            expected: "non-empty string or null",
+        }),
+    }
+}
+
 fn parse_blend_mode(value: &str) -> Result<BlendMode, CommandError> {
     match value {
         "normal" => Ok(BlendMode::Normal),
@@ -1199,6 +1728,127 @@ fn parse_blend_mode(value: &str) -> Result<BlendMode, CommandError> {
         _ => Err(CommandError::InvalidParameter {
             key: "blend_mode",
             expected: "known blend mode",
+        }),
+    }
+}
+
+fn parse_export_participation(value: &str) -> Result<ExportParticipation, CommandError> {
+    match value {
+        "included" => Ok(ExportParticipation::Included),
+        "excluded" => Ok(ExportParticipation::Excluded),
+        "inherit" => Ok(ExportParticipation::Inherit),
+        _ => Err(CommandError::InvalidParameter {
+            key: "participation",
+            expected: "included, excluded, or inherit",
+        }),
+    }
+}
+
+fn optional_output_format(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<Option<OutputFormat>, CommandError> {
+    parameters
+        .optional_string(key)?
+        .map(parse_output_format)
+        .transpose()
+}
+
+fn parse_output_format(value: &str) -> Result<OutputFormat, CommandError> {
+    match value {
+        "png" => Ok(OutputFormat::Png),
+        "jpeg" | "jpg" => Ok(OutputFormat::Jpeg),
+        "webp" => Ok(OutputFormat::WebP),
+        "avif" => Ok(OutputFormat::Avif),
+        "gif" => Ok(OutputFormat::Gif),
+        "bmp" => Ok(OutputFormat::Bmp),
+        "tiff" => Ok(OutputFormat::Tiff),
+        "ico" => Ok(OutputFormat::Ico),
+        "icns" => Ok(OutputFormat::Icns),
+        "svg_rasterized" => Ok(OutputFormat::SvgRasterized),
+        "pdf" => Ok(OutputFormat::Pdf),
+        _ => Err(CommandError::InvalidParameter {
+            key: "format",
+            expected: "known output format",
+        }),
+    }
+}
+
+fn optional_export_background(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<Option<ExportBackground>, CommandError> {
+    parameters
+        .optional_string(key)?
+        .map(parse_export_background)
+        .transpose()
+}
+
+fn parse_export_background(value: &str) -> Result<ExportBackground, CommandError> {
+    match value {
+        "transparent" => Ok(ExportBackground::Transparent),
+        "checkerboard_preview" => Ok(ExportBackground::CheckerboardPreview),
+        "white" => Ok(ExportBackground::Solid {
+            color: crate::model::RgbaColor {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
+        }),
+        "black" => Ok(ExportBackground::Solid {
+            color: crate::model::RgbaColor {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+        }),
+        _ => Err(CommandError::InvalidParameter {
+            key: "background",
+            expected: "transparent, checkerboard_preview, white, or black",
+        }),
+    }
+}
+
+fn optional_transparency(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<Option<TransparencyBehavior>, CommandError> {
+    parameters
+        .optional_string(key)?
+        .map(parse_transparency)
+        .transpose()
+}
+
+fn parse_transparency(value: &str) -> Result<TransparencyBehavior, CommandError> {
+    match value {
+        "preserve" => Ok(TransparencyBehavior::Preserve),
+        "flatten" => Ok(TransparencyBehavior::Flatten),
+        _ => Err(CommandError::InvalidParameter {
+            key: "transparency",
+            expected: "preserve or flatten",
+        }),
+    }
+}
+
+fn optional_metadata(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<Option<MetadataBehavior>, CommandError> {
+    parameters
+        .optional_string(key)?
+        .map(parse_metadata)
+        .transpose()
+}
+
+fn parse_metadata(value: &str) -> Result<MetadataBehavior, CommandError> {
+    match value {
+        "preserve" => Ok(MetadataBehavior::Preserve),
+        "strip" => Ok(MetadataBehavior::Strip),
+        _ => Err(CommandError::InvalidParameter {
+            key: "metadata",
+            expected: "preserve or strip",
         }),
     }
 }
@@ -1610,6 +2260,74 @@ mod tests {
         engine.undo(&mut workspace).expect("undo rasterize");
         assert!(workspace.layers.is_empty());
         assert_eq!(workspace.image_objects[0].rasterized_layer_id, None);
+    }
+
+    #[test]
+    fn export_area_and_output_commands_are_undoable() {
+        let registry = default_command_registry().expect("registry");
+        let mut engine = CommandEngine::new();
+        let mut workspace = Workspace::empty(id("workspace"));
+
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "output.add",
+                    vec![
+                        ("id", JsonValue::String("output".to_owned())),
+                        ("filename", JsonValue::String("icon.png".to_owned())),
+                        ("format", JsonValue::String("png".to_owned())),
+                        ("scale", JsonValue::Number(2.0)),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("add output");
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "export_area.create",
+                    vec![
+                        ("id", JsonValue::String("area".to_owned())),
+                        ("name", JsonValue::String("Icon".to_owned())),
+                        ("width", JsonValue::Number(32.0)),
+                        ("height", JsonValue::Number(32.0)),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("create area");
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "export_area.attach_output",
+                    vec![
+                        ("area_id", JsonValue::String("area".to_owned())),
+                        ("output_id", JsonValue::String("output".to_owned())),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("attach output");
+
+        assert_eq!(workspace.outputs.len(), 1);
+        assert_eq!(workspace.export_areas.len(), 1);
+        assert_eq!(workspace.export_areas[0].output_ids, vec![id("output")]);
+        assert_eq!(workspace.history.entries.len(), 3);
+
+        engine.undo(&mut workspace).expect("undo attach");
+        assert!(workspace.export_areas[0].output_ids.is_empty());
+
+        engine.undo(&mut workspace).expect("undo area");
+        assert!(workspace.export_areas.is_empty());
+
+        engine.undo(&mut workspace).expect("undo output");
+        assert!(workspace.outputs.is_empty());
     }
 
     fn rename_invocation(name: &str) -> CommandInvocation {
