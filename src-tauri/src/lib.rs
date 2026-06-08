@@ -134,8 +134,13 @@ pub fn run() {
             {
                 app.set_menu(build_macos_menu(app.handle())?)?;
                 if let Some(window) = app.get_webview_window("main") {
-                    window.set_decorations(true)?;
                     window.set_title_bar_style(TitleBarStyle::Overlay)?;
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.set_decorations(false)?;
                 }
             }
             Ok(())
