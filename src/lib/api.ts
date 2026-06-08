@@ -19,6 +19,7 @@ import type {
   ImageSourceState,
   Layer,
   OpenWorkspaceResult,
+  Output,
   Point,
   RecentFile,
   Rect,
@@ -86,6 +87,38 @@ type MockImageObject = {
   replaced: boolean;
 };
 
+/** Core background param string (mirrors the strings `command.rs` parses). */
+type MockBackground = "transparent" | "white" | "black" | "checkerboard_preview";
+
+/** Mock output definition (stands in for `fleck-core::model::OutputDefinition`). */
+type MockOutput = {
+  id: string;
+  filename: string;
+  folder: string | null;
+  /** Core format param string, e.g. "png", "jpeg", "webp". */
+  format: string;
+  width: number | null;
+  height: number | null;
+  scale: number;
+  quality: number | null;
+  background: MockBackground;
+  transparency: "preserve" | "flatten";
+  metadata: "preserve" | "strip";
+};
+
+/** Mock export area (stands in for `fleck-core::model::ExportArea` — metadata only). */
+type MockExportArea = {
+  id: string;
+  name: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  padding: { top: number; right: number; bottom: number; left: number };
+  background: MockBackground;
+  outputIds: string[];
+  includedLayerIds: string[];
+  excludedLayerIds: string[];
+  tags: string[];
+};
+
 const mockDoc: {
   meta: WorkspaceMeta;
   /** Canvas dimensions in workspace pixels (0 = no document loaded yet). */
@@ -93,7 +126,8 @@ const mockDoc: {
   layers: Layer[];
   assets: MockAsset[];
   imageObjects: MockImageObject[];
-  exportAreas: ExportArea[];
+  exportAreas: MockExportArea[];
+  outputs: MockOutput[];
   /** Undo stack + cursor, mirroring `CommandEngine` (undoable commands only). */
   history: { entries: HistoryEntry[]; currentIndex: number | null };
 } = {
@@ -111,6 +145,7 @@ const mockDoc: {
   assets: [],
   imageObjects: [],
   exportAreas: [],
+  outputs: [],
 };
 
 /**
@@ -124,17 +159,15 @@ function buildRenderModel(): RenderModel {
     return { canvas: { width: 0, height: 0 }, layers: [], exportAreas: [], guides: [], selections: [] };
   }
   const inset: Rect = { x: width * 0.12, y: height * 0.16, width: width * 0.45, height: height * 0.5 };
-  const badge: Rect = { x: width * 0.66, y: height * 0.1, width: width * 0.26, height: width * 0.26 };
   return {
     canvas: { width, height },
     layers: [
       { id: "rl-base", rect: { x: 0, y: 0, width, height }, color: "#2b3b55", opacity: 1, visible: true },
       { id: "rl-art", rect: inset, color: "#3a86ff", opacity: 0.9, visible: true },
     ],
-    exportAreas: [
-      { id: "ea-frame", name: "frame", rect: { x: 0, y: 0, width, height } },
-      { id: "ea-icon", name: "icon", rect: badge },
-    ],
+    // Export areas are document metadata, so the canvas draws exactly what the
+    // exports panel lists — keeping selection/highlight in sync across both.
+    exportAreas: mockDoc.exportAreas.map((area) => ({ id: area.id, name: area.name, rect: { ...area.bounds } })),
     guides: [
       { axis: "vertical", position: width / 2 },
       { axis: "horizontal", position: height / 2 },
@@ -418,6 +451,334 @@ function formatFromPath(path: string | null): string | null {
   return ext.toUpperCase();
 }
 
+// --- Mock export-area / output operations ------------------------------------
+// Apply `export_area.*` and `output.*` core commands to the mock document and
+// project export areas (joined with their outputs + computed preview metadata)
+// into the `ExportArea` DTO the UI reads. The projection mirrors
+// `fleck-core::export::preview_export_area`: padded pixel bounds, per-output
+// preview dimensions, and the warning set all come from here so the UI consumes
+// preview metadata rather than recomputing it.
+
+/** Human labels for export history entries (mirrors core `CommandEffect` labels). */
+const EXPORT_OP_LABELS: Record<string, string> = {
+  "export_area.create": "Create Export Area",
+  "export_area.rename": "Rename Export Area",
+  "export_area.move": "Move Export Area",
+  "export_area.resize": "Resize Export Area",
+  "export_area.duplicate": "Duplicate Export Area",
+  "export_area.delete": "Delete Export Area",
+  "export_area.set_tags": "Set Export Area Tags",
+  "export_area.attach_output": "Attach Output To Export Area",
+  "export_area.detach_output": "Detach Output From Export Area",
+  "output.add": "Add Output",
+  "output.remove": "Remove Output",
+  "output.duplicate": "Duplicate Output",
+  "output.update": "Update Output",
+};
+
+const FORMAT_LABELS: Record<string, string> = {
+  png: "PNG",
+  jpeg: "JPEG",
+  jpg: "JPEG",
+  webp: "WebP",
+  avif: "AVIF",
+  gif: "GIF",
+  bmp: "BMP",
+  tiff: "TIFF",
+  ico: "ICO",
+  icns: "ICNS",
+  svg_rasterized: "SVG",
+  pdf: "PDF",
+};
+
+function formatLabel(format: string): string {
+  return FORMAT_LABELS[format.toLowerCase()] ?? format.toUpperCase();
+}
+
+function backgroundLabel(background: MockBackground): string {
+  switch (background) {
+    case "transparent":
+      return "Transparent";
+    case "white":
+      return "Solid #ffffff";
+    case "black":
+      return "Solid #000000";
+    case "checkerboard_preview":
+      return "Checkerboard";
+  }
+}
+
+/** Summarize per-side padding the way the inspector shows it. */
+function paddingLabel(p: MockExportArea["padding"]): string {
+  if (p.top === 0 && p.right === 0 && p.bottom === 0 && p.left === 0) return "None";
+  if (p.top === p.right && p.right === p.bottom && p.bottom === p.left) return `${round(p.top)} px`;
+  return `T${round(p.top)} R${round(p.right)} B${round(p.bottom)} L${round(p.left)}`;
+}
+
+function round(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+/** Format a float scale as "1×", "2×", "0.5×". */
+function scaleLabel(scale: number): string {
+  return `${Number(scale.toFixed(3))}×`;
+}
+
+/** Padded export pixel bounds (mirrors `export::padded_pixel_rect`). */
+function paddedPixels(area: MockExportArea): { width: number; height: number } {
+  return {
+    width: Math.max(1, Math.ceil(area.bounds.width + area.padding.left + area.padding.right)),
+    height: Math.max(1, Math.ceil(area.bounds.height + area.padding.top + area.padding.bottom)),
+  };
+}
+
+/** Layers that participate in an area (mirrors `export::participating_layers`). */
+function participatingLayerIds(area: MockExportArea): string[] {
+  return mockDoc.layers
+    .filter((layer) => layer.visible && layer.opacity > 0)
+    .filter((layer) => !area.excludedLayerIds.includes(layer.id))
+    .filter((layer) => area.includedLayerIds.length === 0 || area.includedLayerIds.includes(layer.id))
+    .map((layer) => layer.id);
+}
+
+/** Compute the human warning set from preview metadata (mirrors `ExportWarning`). */
+function exportWarnings(area: MockExportArea, outputs: MockOutput[]): string[] {
+  const warnings: string[] = [];
+  if (area.includedLayerIds.some((id) => area.excludedLayerIds.includes(id))) {
+    warnings.push("A layer is both included and excluded");
+  }
+  if (outputs.length === 0) warnings.push("No outputs configured");
+  if (participatingLayerIds(area).length === 0) warnings.push("No layers participate in this export");
+  for (const output of outputs) {
+    if (output.format.toLowerCase() === "jpeg" && output.transparency === "preserve") {
+      warnings.push(`${output.filename}: JPEG cannot preserve transparency`);
+    }
+    if (output.background === "checkerboard_preview") {
+      warnings.push(`${output.filename}: checkerboard is a preview-only background`);
+    }
+  }
+  return warnings;
+}
+
+/** Project a mock output + the area's padded bounds into the read DTO. */
+function projectOutput(output: MockOutput, padded: { width: number; height: number }): Output {
+  const pixelWidth = output.width ?? Math.max(1, Math.round(padded.width * output.scale));
+  const pixelHeight = output.height ?? Math.max(1, Math.round(padded.height * output.scale));
+  return {
+    id: output.id,
+    filename: output.filename,
+    format: formatLabel(output.format),
+    scale: scaleLabel(output.scale),
+    quality: output.quality,
+    destination: output.folder ? `${output.folder}/${output.filename}` : null,
+    dimensions: `${pixelWidth} × ${pixelHeight} px`,
+    bytes: "pending",
+  };
+}
+
+/** Project a mock export area (joined with outputs + preview metadata) into the DTO. */
+function projectExportArea(area: MockExportArea): ExportArea {
+  const outputs = area.outputIds
+    .map((id) => mockDoc.outputs.find((o) => o.id === id))
+    .filter((o): o is MockOutput => o !== undefined);
+  const padded = paddedPixels(area);
+  const warnings = exportWarnings(area, outputs);
+  return {
+    id: area.id,
+    name: area.name,
+    dimensions: `${round(area.bounds.width)} × ${round(area.bounds.height)} px`,
+    position: `${round(area.bounds.x)}, ${round(area.bounds.y)}`,
+    padding: paddingLabel(area.padding),
+    background: backgroundLabel(area.background),
+    format: outputs[0] ? formatLabel(outputs[0].format) : "—",
+    status: warnings.length > 0 ? "warning" : "ready",
+    warnings,
+    outputs: outputs.map((o) => projectOutput(o, padded)),
+  };
+}
+
+const num = (v: unknown, fallback = 0): number => (Number.isFinite(Number(v)) ? Number(v) : fallback);
+
+/** Map a background command string to the mock enum (defaults to transparent). */
+function backgroundParam(value: unknown): MockBackground {
+  return value === "white" || value === "black" || value === "checkerboard_preview" ? value : "transparent";
+}
+
+/**
+ * Mutate `mockDoc` for a resolved `export_area.*` / `output.*` command. Returns
+ * whether the document changed, so no-ops don't record a history entry.
+ */
+function applyExportMutation(commandId: string, p: Record<string, unknown>): boolean {
+  const areas = mockDoc.exportAreas;
+  const findArea = (id: unknown) => areas.find((a) => a.id === id);
+  const findOutput = (id: unknown) => mockDoc.outputs.find((o) => o.id === id);
+
+  switch (commandId) {
+    case "export_area.create": {
+      const width = num(p.width);
+      const height = num(p.height);
+      if (width <= 0 || height <= 0) return false;
+      areas.push({
+        id: String(p.id),
+        name: String(p.name ?? "Export area"),
+        bounds: { x: num(p.x), y: num(p.y), width, height },
+        padding: { top: 0, right: 0, bottom: 0, left: 0 },
+        background: "transparent",
+        outputIds: [],
+        includedLayerIds: [],
+        excludedLayerIds: [],
+        tags: [],
+      });
+      return true;
+    }
+    case "export_area.rename": {
+      const area = findArea(p.id);
+      if (!area) return false;
+      area.name = String(p.name ?? area.name);
+      return true;
+    }
+    case "export_area.move": {
+      const area = findArea(p.id);
+      if (!area) return false;
+      area.bounds.x = num(p.x, area.bounds.x);
+      area.bounds.y = num(p.y, area.bounds.y);
+      return true;
+    }
+    case "export_area.resize": {
+      const area = findArea(p.id);
+      const width = num(p.width);
+      const height = num(p.height);
+      if (!area || width <= 0 || height <= 0) return false;
+      area.bounds.width = width;
+      area.bounds.height = height;
+      return true;
+    }
+    case "export_area.duplicate": {
+      const src = findArea(p.id);
+      if (!src) return false;
+      areas.push({
+        ...src,
+        id: String(p.new_id),
+        name: `${src.name} Copy`,
+        bounds: { ...src.bounds },
+        padding: { ...src.padding },
+        outputIds: [...src.outputIds],
+        includedLayerIds: [...src.includedLayerIds],
+        excludedLayerIds: [...src.excludedLayerIds],
+        tags: [...src.tags],
+      });
+      return true;
+    }
+    case "export_area.delete": {
+      const i = areas.findIndex((a) => a.id === p.id);
+      if (i === -1) return false;
+      areas.splice(i, 1);
+      return true;
+    }
+    case "export_area.set_tags": {
+      const area = findArea(p.id);
+      if (!area) return false;
+      const raw = Array.isArray(p.tags) ? (p.tags as unknown[]).map(String) : String(p.tags ?? "").split(",");
+      area.tags = raw.map((t) => t.trim()).filter((t, i, arr) => t && arr.indexOf(t) === i);
+      return true;
+    }
+    case "export_area.attach_output": {
+      const area = findArea(p.area_id);
+      if (!area || !findOutput(p.output_id)) return false;
+      if (!area.outputIds.includes(String(p.output_id))) area.outputIds.push(String(p.output_id));
+      return true;
+    }
+    case "export_area.detach_output": {
+      const area = findArea(p.area_id);
+      if (!area) return false;
+      area.outputIds = area.outputIds.filter((id) => id !== p.output_id);
+      return true;
+    }
+    case "output.add": {
+      const filename = String(p.filename ?? "").trim();
+      if (!filename) return false;
+      mockDoc.outputs.push({
+        id: String(p.id),
+        filename,
+        folder: typeof p.folder === "string" && p.folder ? p.folder : null,
+        format: String(p.format ?? "png"),
+        width: p.width == null ? null : Math.trunc(num(p.width)),
+        height: p.height == null ? null : Math.trunc(num(p.height)),
+        scale: p.scale == null ? 1 : num(p.scale, 1),
+        quality: p.quality == null ? null : Math.trunc(num(p.quality)),
+        background: backgroundParam(p.background),
+        transparency: p.transparency === "flatten" ? "flatten" : "preserve",
+        metadata: p.metadata === "preserve" ? "preserve" : "strip",
+      });
+      return true;
+    }
+    case "output.remove": {
+      const i = mockDoc.outputs.findIndex((o) => o.id === p.id);
+      if (i === -1) return false;
+      mockDoc.outputs.splice(i, 1);
+      for (const area of areas) area.outputIds = area.outputIds.filter((id) => id !== p.id);
+      return true;
+    }
+    case "output.duplicate": {
+      const src = findOutput(p.id);
+      if (!src) return false;
+      const [stem, ext] = src.filename.includes(".")
+        ? [src.filename.slice(0, src.filename.lastIndexOf(".")), src.filename.slice(src.filename.lastIndexOf("."))]
+        : [src.filename, ""];
+      mockDoc.outputs.push({ ...src, id: String(p.new_id), filename: `${stem}-copy${ext}` });
+      return true;
+    }
+    case "output.update": {
+      const output = findOutput(p.id);
+      if (!output) return false;
+      if (p.filename != null) output.filename = String(p.filename);
+      if (p.format != null) output.format = String(p.format);
+      if (p.scale != null) output.scale = num(p.scale, output.scale);
+      if (p.quality !== undefined) output.quality = p.quality == null ? null : Math.trunc(num(p.quality));
+      if (p.background != null) output.background = backgroundParam(p.background);
+      if (p.transparency != null) output.transparency = p.transparency === "flatten" ? "flatten" : "preserve";
+      if (p.metadata != null) output.metadata = p.metadata === "preserve" ? "preserve" : "strip";
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+/** Seed a representative set of export areas + outputs for a loaded mock workspace. */
+function seedMockExports(width: number, height: number) {
+  mockDoc.outputs = [
+    { id: "out-frame-png", filename: "frame.png", folder: null, format: "png", width: null, height: null, scale: 1, quality: null, background: "transparent", transparency: "preserve", metadata: "strip" },
+    { id: "out-frame-jpg", filename: "frame.jpg", folder: "social", format: "jpeg", width: null, height: null, scale: 1, quality: 82, background: "transparent", transparency: "preserve", metadata: "strip" },
+    { id: "out-icon-1x", filename: "icon.png", folder: "icons", format: "png", width: null, height: null, scale: 1, quality: null, background: "transparent", transparency: "preserve", metadata: "strip" },
+    { id: "out-icon-2x", filename: "icon@2x.png", folder: "icons", format: "png", width: null, height: null, scale: 2, quality: null, background: "transparent", transparency: "preserve", metadata: "strip" },
+  ];
+  mockDoc.exportAreas = [
+    {
+      id: "ea-frame",
+      name: "frame",
+      bounds: { x: 0, y: 0, width, height },
+      padding: { top: 0, right: 0, bottom: 0, left: 0 },
+      background: "transparent",
+      outputIds: ["out-frame-png", "out-frame-jpg"],
+      includedLayerIds: [],
+      excludedLayerIds: [],
+      tags: ["marketing"],
+    },
+    {
+      id: "ea-icon",
+      name: "icon",
+      bounds: { x: Math.round(width * 0.66), y: Math.round(height * 0.1), width: 256, height: 256 },
+      padding: { top: 8, right: 8, bottom: 8, left: 8 },
+      background: "transparent",
+      outputIds: ["out-icon-1x", "out-icon-2x"],
+      includedLayerIds: [],
+      excludedLayerIds: [],
+      tags: ["icons"],
+    },
+  ];
+}
+
 // --- Queries (read document state) -------------------------------------------
 
 export const api = {
@@ -434,9 +795,7 @@ export const api = {
   },
 
   getExportAreas(): Promise<ExportArea[]> {
-    return bridge("get_export_areas", {}, () =>
-      mockDoc.exportAreas.map((a) => ({ ...a, outputs: a.outputs.map((o) => ({ ...o })) })),
-    );
+    return bridge("get_export_areas", {}, () => mockDoc.exportAreas.map(projectExportArea));
   },
 
   getHistory(): Promise<HistoryState> {
@@ -490,6 +849,7 @@ export const api = {
         { id: "img-badge", name: "Badge", sourceAssetId: "asset-badge", position: { x: 840, y: 40 }, scale: { width: 160, height: 160 }, rotationDegrees: 0, opacity: 90, crop: null, rasterizedLayerId: null, replaced: false },
         { id: "img-hero", name: "Hero", sourceAssetId: "asset-hero", position: { x: 0, y: 0 }, scale: { width: 1200, height: 675 }, rotationDegrees: 0, opacity: 100, crop: null, rasterizedLayerId: null, replaced: false },
       ];
+      seedMockExports(1200, 630);
       mockDoc.meta = {
         name: "marketing-assets.fleck",
         dirty: false,
@@ -527,6 +887,12 @@ export const api = {
       ];
       mockDoc.imageObjects = [
         { id: "img-mark", name: "Mark", sourceAssetId: "asset-mark", position: { x: 64, y: 64 }, scale: { width: 384, height: 384 }, rotationDegrees: 0, opacity: 100, crop: null, rasterizedLayerId: null, replaced: false },
+      ];
+      mockDoc.outputs = [
+        { id: "out-app-png", filename: "app-icon.png", folder: null, format: "png", width: null, height: null, scale: 1, quality: null, background: "transparent", transparency: "preserve", metadata: "strip" },
+      ];
+      mockDoc.exportAreas = [
+        { id: "ea-app", name: "app-icon", bounds: { x: 0, y: 0, width: 512, height: 512 }, padding: { top: 0, right: 0, bottom: 0, left: 0 }, background: "transparent", outputIds: ["out-app-png"], includedLayerIds: [], excludedLayerIds: [], tags: [] },
       ];
       mockDoc.meta = {
         name,
@@ -643,6 +1009,8 @@ export const api = {
       mockDoc.layers = [];
       mockDoc.assets = [];
       mockDoc.imageObjects = [];
+      mockDoc.exportAreas = [];
+      mockDoc.outputs = [];
       mockDoc.history = { entries: [], currentIndex: null };
       mockDoc.meta = { name: "Untitled.fleck", dirty: false, layerCount: 0, selectedCount: 0, canvasSize: "0 × 0 px" };
     });
@@ -666,12 +1034,17 @@ export const api = {
    * (fit / zoom-to-selection / zoom-to-export-area). `actual` and `pixel-perfect`
    * are handled on the frontend and don't call this.
    */
-  getViewportFocus(kind: ViewportFocusKind, screen: Size): Promise<{ origin: Point; zoom: number } | null> {
-    return bridge("get_viewport_focus", { kind, screen }, () => {
+  getViewportFocus(
+    kind: ViewportFocusKind,
+    screen: Size,
+    targetId?: string | null,
+  ): Promise<{ origin: Point; zoom: number } | null> {
+    return bridge("get_viewport_focus", { kind, screen, targetId }, () => {
       const model = buildRenderModel();
       let rect: Rect | null = null;
       if (kind === "selection") rect = model.selections[0]?.rect ?? null;
-      else if (kind === "export-area") rect = model.exportAreas[0]?.rect ?? null;
+      else if (kind === "export-area")
+        rect = (targetId && model.exportAreas.find((a) => a.id === targetId)?.rect) || model.exportAreas[0]?.rect || null;
       else rect = model.canvas.width > 0 ? { x: 0, y: 0, width: model.canvas.width, height: model.canvas.height } : null;
       if (!rect) return null;
       const fitted = fitRect(rect, screen);
@@ -710,6 +1083,12 @@ export const api = {
       if (commandId.startsWith("image.")) {
         const changed = applyImageMutation(commandId, parameters);
         const label = IMAGE_OP_LABELS[commandId] ?? commandId;
+        if (changed) pushHistory(commandId, label);
+        return { commandId, operationLabel: label } satisfies CommandExecution;
+      }
+      if (commandId.startsWith("export_area.") || commandId.startsWith("output.")) {
+        const changed = applyExportMutation(commandId, parameters);
+        const label = EXPORT_OP_LABELS[commandId] ?? commandId;
         if (changed) pushHistory(commandId, label);
         return { commandId, operationLabel: label } satisfies CommandExecution;
       }

@@ -29,11 +29,12 @@ type UIState = {
   setPaletteOpen: (open: boolean) => void;
   togglePalette: () => void;
 
-  // Side panel tab + which export area is expanded
+  // Side panel tab + which export area is selected (shared across the exports
+  // panel, the export inspector, and the canvas highlight/overlay).
   sideTab: SideTab;
   setSideTab: (tab: SideTab) => void;
-  openExportAreaId: string | null;
-  setOpenExportAreaId: (id: string | null) => void;
+  selectedExportAreaId: string | null;
+  setSelectedExportAreaId: (id: string | null) => void;
 };
 
 export const useUIStore = create<UIState>((set) => ({
@@ -52,6 +53,6 @@ export const useUIStore = create<UIState>((set) => ({
 
   sideTab: "layers",
   setSideTab: (tab) => set({ sideTab: tab }),
-  openExportAreaId: null,
-  setOpenExportAreaId: (id) => set({ openExportAreaId: id }),
+  selectedExportAreaId: null,
+  setSelectedExportAreaId: (id) => set({ selectedExportAreaId: id }),
 }));

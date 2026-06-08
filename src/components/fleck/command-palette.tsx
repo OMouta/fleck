@@ -95,7 +95,7 @@ export function CommandPalette() {
   const selectedLayerId = useUIStore((s) => s.selectedLayerId);
   const selectedImageObjectId = useUIStore((s) => s.selectedImageObjectId);
   const sideTab = useUIStore((s) => s.sideTab);
-  const openExportAreaId = useUIStore((s) => s.openExportAreaId);
+  const selectedExportAreaId = useUIStore((s) => s.selectedExportAreaId);
 
   const recentIds = useCommandStore((s) => s.recentCommandIds);
   const lastInvocation = useCommandStore((s) => s.lastInvocation);
@@ -119,10 +119,10 @@ export function CommandPalette() {
     return (group: CommandGroup): number => {
       if (group === "layer" && selectedLayerId) return 6;
       if (group === "image_object" && (selectedImageObjectId || sideTab === "images")) return 6;
-      if (group === "export" && (openExportAreaId || sideTab === "exports")) return 6;
+      if (group === "export" && (selectedExportAreaId || sideTab === "exports")) return 6;
       return 0;
     };
-  }, [selectedLayerId, selectedImageObjectId, openExportAreaId, sideTab]);
+  }, [selectedLayerId, selectedImageObjectId, selectedExportAreaId, sideTab]);
 
   const byId = useMemo(() => new Map(commands.map((c) => [c.id, c])), [commands]);
   const lastDef = lastInvocation ? byId.get(lastInvocation.id) : undefined;

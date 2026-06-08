@@ -32,8 +32,11 @@ type ViewportState = {
   zoomCentered: (factor: number) => void;
   setPanning: (panning: boolean) => void;
 
-  /** Focus actions: fit / selection / export-area / actual (100%) / pixel-perfect. */
-  focus: (kind: ViewportFocusKind) => Promise<void>;
+  /**
+   * Focus actions: fit / selection / export-area / actual (100%) / pixel-perfect.
+   * `targetId` selects a specific export area to zoom to (defaults to the first).
+   */
+  focus: (kind: ViewportFocusKind, targetId?: string | null) => Promise<void>;
 
   toggleOverlay: (key: OverlayToggleKey) => void;
   togglePixelGrid: () => void;
@@ -75,7 +78,7 @@ export const useViewportStore = create<ViewportState>((set, get) => ({
 
   setPanning: (panning) => set({ panning }),
 
-  focus: async (kind) => {
+  focus: async (kind, targetId) => {
     const s = get();
     const center: Point = { x: s.screen.width / 2, y: s.screen.height / 2 };
     if (kind === "actual") {
@@ -88,7 +91,7 @@ export const useViewportStore = create<ViewportState>((set, get) => ({
       set({ origin: next.origin, zoom: next.zoom });
       return;
     }
-    const result = await api.getViewportFocus(kind, s.screen);
+    const result = await api.getViewportFocus(kind, s.screen, targetId);
     if (result) set({ origin: result.origin, zoom: clampZoom(result.zoom) });
   },
 

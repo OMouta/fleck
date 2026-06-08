@@ -33,9 +33,11 @@ type PaintArgs = {
   overlays: OverlaySettings;
   palette: Palette;
   dpr: number;
+  /** Export area to emphasize (kept in sync with the exports panel selection). */
+  selectedExportAreaId?: string | null;
 };
 
-export function paintScene({ ctx, model, vp, overlays, palette, dpr }: PaintArgs) {
+export function paintScene({ ctx, model, vp, overlays, palette, dpr, selectedExportAreaId }: PaintArgs) {
   const { width, height } = vp.screen;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
@@ -61,7 +63,7 @@ export function paintScene({ ctx, model, vp, overlays, palette, dpr }: PaintArgs
     ctx.strokeRect(canvasRect.x + 0.5, canvasRect.y + 0.5, canvasRect.width, canvasRect.height);
   }
 
-  if (overlays.exportAreas) drawExportAreas(ctx, model, vp, palette);
+  if (overlays.exportAreas) drawExportAreas(ctx, model, vp, palette, selectedExportAreaId ?? null);
   if (overlays.selections) drawSelections(ctx, model, vp, palette);
   if (overlays.transformHandles) drawTransformHandles(ctx, model, vp, palette);
   if (overlays.guides) drawGuides(ctx, model, vp, palette);
@@ -117,21 +119,34 @@ function drawCheckerboard(ctx: CanvasRenderingContext2D, rect: Rect) {
   ctx.restore();
 }
 
-function drawExportAreas(ctx: CanvasRenderingContext2D, model: RenderModel, vp: Viewport, palette: Palette) {
+function drawExportAreas(
+  ctx: CanvasRenderingContext2D,
+  model: RenderModel,
+  vp: Viewport,
+  palette: Palette,
+  selectedId: string | null,
+) {
   ctx.save();
   ctx.strokeStyle = palette.exportArea;
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([5, 4]);
   ctx.font = "11px ui-monospace, monospace";
   for (const area of model.exportAreas) {
     const r = toScreenRect(vp, area.rect);
+    const selected = area.id === selectedId;
+    // The selected area reads as solid + heavier; others stay dashed and subtle.
+    ctx.lineWidth = selected ? 2 : 1.5;
+    ctx.setLineDash(selected ? [] : [5, 4]);
+    if (selected) {
+      ctx.fillStyle = palette.exportArea;
+      ctx.globalAlpha = 0.08;
+      ctx.fillRect(r.x, r.y, r.width, r.height);
+      ctx.globalAlpha = 1;
+    }
     ctx.strokeRect(r.x, r.y, r.width, r.height);
     ctx.setLineDash([]);
     ctx.fillStyle = palette.exportArea;
     ctx.fillRect(r.x, r.y - 16, ctx.measureText(area.name).width + 10, 15);
     ctx.fillStyle = palette.exportLabelText;
     ctx.fillText(area.name, r.x + 5, r.y - 5);
-    ctx.setLineDash([5, 4]);
   }
   ctx.restore();
 }

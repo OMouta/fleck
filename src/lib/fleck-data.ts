@@ -144,21 +144,50 @@ export type ImageObject = {
   rasterizedLayerId: string | null;
 };
 
+/**
+ * UI projection of `fleck-core::model::OutputDefinition` joined with the export
+ * area's `OutputPreview` (so pixel dimensions, scale, and destination already
+ * reflect padding + scale from core preview metadata — the UI never recomputes
+ * them).
+ */
 export type Output = {
   id: string;
   filename: string;
+  /** Format label (e.g. "PNG", "JPEG"). */
   format: string;
-  size: string;
+  /** Rendered scale, e.g. "1×", "2×", "0.5×". */
+  scale: string;
+  /** Lossy quality 0–100, or null for lossless/unset formats. */
+  quality: number | null;
+  /** Resolved destination path (folder + filename), or null for next-to-workspace. */
+  destination: string | null;
+  /** Preview pixel dimensions after padding + scale (e.g. "512 × 512 px"). */
+  dimensions: string;
+  /** Estimated output size; "pending" until a real export runs. */
   bytes: string;
 };
 
+/**
+ * UI projection of `fleck-core::model::ExportArea` joined with its core export
+ * preview. `warnings` come straight from `ExportPreview::warnings` (core preview
+ * metadata) — the UI displays them, it does not derive them.
+ */
 export type ExportArea = {
   id: string;
   name: string;
+  /** Source bounds, e.g. "512 × 512 px". */
   dimensions: string;
+  /** Top-left position in workspace pixels, e.g. "0, 0". */
+  position: string;
+  /** Padding summary, e.g. "None" or "8 px" or "T8 R4 B8 L4". */
+  padding: string;
+  /** Background summary, e.g. "Transparent", "Solid #ffffff", "Checkerboard". */
+  background: string;
+  /** First attached output's format, or "—" when no outputs are configured. */
   format: string;
-  status: "ready" | "warning" | "stale";
-  note?: string;
+  status: "ready" | "warning";
+  /** Human-readable warnings sourced from core export preview metadata. */
+  warnings: string[];
   outputs: Output[];
 };
 

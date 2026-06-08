@@ -9,16 +9,29 @@ import {
   Ruler,
   SquareDashed,
   Move,
+  Copy,
+  Trash2,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useRenderModel } from "@/lib/queries";
 import { paintScene, type Palette } from "@/lib/render";
-import type { Point } from "@/lib/fleck-data";
+import type { Point, Rect } from "@/lib/fleck-data";
 import { cn } from "@/lib/utils";
 import { openImageFlow, dropImageFlow } from "@/lib/image-import";
+import { screenToWorkspace } from "@/lib/viewport";
+import { DEFAULT_EXPORT_AREA_SIZE } from "@/lib/export-commands";
 import { useUIStore } from "@/store/ui-store";
 import { useViewportStore } from "@/store/viewport-store";
+import { useCommandStore } from "@/store/command-store";
 import { useWorkspaceFilesStore } from "@/store/workspace-files-store";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 
 function readPalette(): Palette {
   const s = getComputedStyle(document.documentElement);
@@ -45,8 +58,15 @@ export function Canvas() {
   const spaceRef = useRef(false);
 
   const activeTool = useUIStore((s) => s.activeTool);
+  const selectedExportAreaId = useUIStore((s) => s.selectedExportAreaId);
+  const setSelectedExportAreaId = useUIStore((s) => s.setSelectedExportAreaId);
+  const setSideTab = useUIStore((s) => s.setSideTab);
+  const execute = useCommandStore((s) => s.execute);
   const newWorkspace = useWorkspaceFilesStore((s) => s.newWorkspace);
   const [dragOver, setDragOver] = useState(false);
+  // Workspace point of the last right-click, used to place a new export area there.
+  const menuPointRef = useRef<Point>({ x: 0, y: 0 });
+  const [menuAreaId, setMenuAreaId] = useState<string | null>(null);
 
   const origin = useViewportStore((s) => s.origin);
   const zoom = useViewportStore((s) => s.zoom);
@@ -105,10 +125,11 @@ export function Canvas() {
         overlays,
         palette: paletteRef.current ?? readPalette(),
         dpr: dprRef.current,
+        selectedExportAreaId,
       });
     });
     return () => cancelAnimationFrame(raf);
-  }, [model, origin, zoom, screen, overlays]);
+  }, [model, origin, zoom, screen, overlays, selectedExportAreaId]);
 
   // Focus the canvas on mount so it's the default editor focus.
   useEffect(() => {
@@ -138,6 +159,36 @@ export function Canvas() {
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
 
+  /** Topmost export area (in workspace coords) under a screen point, if any. */
+  const areaAtScreen = (screenPt: Point): { id: string; rect: Rect } | null => {
+    if (!model) return null;
+    const w = screenToWorkspace({ origin, zoom, screen }, screenPt);
+    for (let i = model.exportAreas.length - 1; i >= 0; i--) {
+      const a = model.exportAreas[i];
+      if (w.x >= a.rect.x && w.x <= a.rect.x + a.rect.width && w.y >= a.rect.y && w.y <= a.rect.y + a.rect.height) {
+        return a;
+      }
+    }
+    return null;
+  };
+
+  const selectArea = (id: string) => {
+    setSelectedExportAreaId(id);
+    setSideTab("exports");
+  };
+
+  /** Create a default-sized export area centred on a screen point. */
+  const createAreaAt = (screenPt: Point) => {
+    const w = screenToWorkspace({ origin, zoom, screen }, screenPt);
+    execute("export_area.create", {
+      name: "Export area",
+      x: Math.round(w.x - DEFAULT_EXPORT_AREA_SIZE.width / 2),
+      y: Math.round(w.y - DEFAULT_EXPORT_AREA_SIZE.height / 2),
+      width: DEFAULT_EXPORT_AREA_SIZE.width,
+      height: DEFAULT_EXPORT_AREA_SIZE.height,
+    });
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     const wantsPan = e.button === 1 || activeTool === "pan" || spaceRef.current;
     if (wantsPan) {
@@ -146,9 +197,27 @@ export function Canvas() {
       (e.target as Element).setPointerCapture(e.pointerId);
       return;
     }
-    if (e.button === 0 && activeTool === "zoom") {
+    if (e.button !== 0) return;
+    if (activeTool === "zoom") {
       zoomAt(pointerPos(e), e.altKey ? 1 / 1.6 : 1.6);
+      return;
     }
+    // Export-area interaction is scoped to the export-area tool so clicks with
+    // other tools don't hijack selection: clicking an existing area selects it
+    // (synced to the panel + inspector), empty space marks a new region.
+    if (activeTool === "export-area") {
+      const hit = areaAtScreen(pointerPos(e));
+      if (hit) selectArea(hit.id);
+      else createAreaAt(pointerPos(e));
+    }
+  };
+
+  const onContextMenu = (e: React.PointerEvent | React.MouseEvent) => {
+    const pt = pointerPos(e as React.PointerEvent);
+    menuPointRef.current = pt;
+    const hit = areaAtScreen(pt);
+    setMenuAreaId(hit?.id ?? null);
+    if (hit) setSelectedExportAreaId(hit.id);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -242,6 +311,8 @@ export function Canvas() {
         : "default";
 
   return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
     <div
       ref={containerRef}
       tabIndex={0}
@@ -251,6 +322,7 @@ export function Canvas() {
       onPointerMove={onPointerMove}
       onPointerUp={endPan}
       onPointerCancel={endPan}
+      onContextMenu={onContextMenu}
       onKeyDown={onKeyDown}
       onKeyUp={onKeyUp}
       onDragOver={onDragOverFiles}
@@ -337,11 +409,58 @@ export function Canvas() {
         <ControlButton label="Zoom to selection" onClick={() => focus("selection")}>
           <SquareDashed className="size-4" />
         </ControlButton>
-        <ControlButton label="Zoom to export area" onClick={() => focus("export-area")}>
+        <ControlButton label="Zoom to export area" onClick={() => focus("export-area", selectedExportAreaId)}>
           <Frame className="size-4" />
         </ControlButton>
       </div>
     </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => createAreaAt(menuPointRef.current)}>
+          <Frame />
+          New export area here
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => api.exportAll()}>
+          <FilePlus2 />
+          Export all areas
+          <ContextMenuShortcut>⌘⇧E</ContextMenuShortcut>
+        </ContextMenuItem>
+        {menuAreaId && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => api.exportArea(menuAreaId)}>
+              <Frame />
+              Export this area
+              <ContextMenuShortcut>⌘E</ContextMenuShortcut>
+            </ContextMenuItem>
+            <ContextMenuItem
+              onSelect={() => {
+                selectArea(menuAreaId);
+                focus("export-area", menuAreaId);
+              }}
+            >
+              <Maximize2 />
+              Zoom to area
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => execute("export_area.duplicate", { id: menuAreaId })}>
+              <Copy />
+              Duplicate area
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              variant="destructive"
+              onSelect={() => {
+                execute("export_area.delete", { id: menuAreaId });
+                if (selectedExportAreaId === menuAreaId) setSelectedExportAreaId(null);
+              }}
+            >
+              <Trash2 />
+              Delete area
+            </ContextMenuItem>
+          </>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

@@ -13,7 +13,6 @@ import {
   Layers,
   FileDown,
   AlertTriangle,
-  RotateCcw,
   Check,
   ChevronRight,
   ChevronDown,
@@ -33,15 +32,26 @@ import {
   History as HistoryIcon,
   Undo2,
   Redo2,
+  Frame,
+  Maximize2,
+  Unlink,
 } from "lucide-react";
-import type { ExportArea, ImageObject, ImageSourceState, Layer } from "@/lib/fleck-data";
+import type { ExportArea, ImageObject, ImageSourceState, Layer, Output } from "@/lib/fleck-data";
 import { api } from "@/lib/api";
 import { useExportAreas, useHistory, useHistoryJumpSupported, useImageObjects, useLayers } from "@/lib/queries";
 import { BLEND_MODES } from "@/lib/layer-commands";
 import { SOURCE_STATE_LABEL } from "@/lib/image-commands";
+import {
+  newExportId,
+  OUTPUT_FORMATS,
+  SCALE_PRESETS,
+  formatParam,
+  isLossyFormat,
+} from "@/lib/export-commands";
 import { openImageFlow, pasteImageFlow, replaceImageFlow, revealImageSourceFlow } from "@/lib/image-import";
 import { cn } from "@/lib/utils";
 import { useUIStore, type SideTab } from "@/store/ui-store";
+import { useViewportStore } from "@/store/viewport-store";
 import { useCommandStore } from "@/store/command-store";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -970,98 +980,489 @@ function round(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+// --- Exports panel -----------------------------------------------------------
+
+/** Export-area actions an action surface can request; mapped to core flows below. */
+type ExportAreaAction = "rename" | "duplicate" | "delete" | "export" | "zoom" | "add-output";
+
+/** Output actions an action surface can request. */
+type OutputAction = "duplicate" | "detach" | "remove";
+
 function ExportsPanel() {
   const { data: areas = [], isLoading } = useExportAreas();
-  const open = useUIStore((s) => s.openExportAreaId);
-  const setOpen = useUIStore((s) => s.setOpenExportAreaId);
+  const selectedId = useUIStore((s) => s.selectedExportAreaId);
+  const setSelected = useUIStore((s) => s.setSelectedExportAreaId);
+  const execute = useCommandStore((s) => s.execute);
+  const focus = useViewportStore((s) => s.focus);
+
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+
+  const selectedArea = areas.find((a) => a.id === selectedId) ?? areas[0];
+
+  // Every export edit routes through the command engine so it is undoable and
+  // recorded in history (see export-commands + command-store).
+  const handleAreaAction = (action: ExportAreaAction, area: ExportArea) => {
+    switch (action) {
+      case "rename":
+        setRenamingId(area.id);
+        break;
+      case "duplicate":
+        execute("export_area.duplicate", { id: area.id });
+        break;
+      case "delete":
+        execute("export_area.delete", { id: area.id });
+        if (selectedId === area.id) setSelected(null);
+        break;
+      case "export":
+        api.exportArea(area.id);
+        break;
+      case "zoom":
+        setSelected(area.id);
+        focus("export-area", area.id);
+        break;
+      case "add-output":
+        addOutput(area.id);
+        break;
+    }
+  };
+
+  // Adding an output is a create + attach: the core `output.add` only registers
+  // the output on the workspace, so we attach it to the area as a second step.
+  const addOutput = async (areaId: string) => {
+    const id = newExportId("output");
+    await execute("output.add", { id, filename: "export.png", format: "png" });
+    await execute("export_area.attach_output", { area_id: areaId, output_id: id });
+  };
+
+  const handleOutputAction = async (action: OutputAction, area: ExportArea, output: Output) => {
+    switch (action) {
+      case "duplicate": {
+        // Duplicate registers a detached copy; attach it to the same area.
+        const newId = newExportId("output");
+        await execute("output.duplicate", { id: output.id, new_id: newId });
+        await execute("export_area.attach_output", { area_id: area.id, output_id: newId });
+        break;
+      }
+      case "detach":
+        execute("export_area.detach_output", { area_id: area.id, output_id: output.id });
+        break;
+      case "remove":
+        execute("output.remove", { id: output.id });
+        break;
+    }
+  };
+
+  const commitRename = (area: ExportArea, name: string) => {
+    setRenamingId(null);
+    if (name && name !== area.name) execute("export_area.rename", { id: area.id, name });
+  };
 
   return (
-    <div className="flex flex-1 flex-col overflow-y-auto p-1.5">
-      {isLoading && <p className="px-3 py-4 text-[13px] text-muted-foreground">Loading export areas…</p>}
-      {!isLoading && areas.length === 0 && (
-        <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">
-          No export areas yet. Use the export area tool to mark a region.
-        </p>
-      )}
-      {areas.map((area) => {
-        const isOpen = open === area.id;
-        return (
-          <div key={area.id} className="mb-1 overflow-hidden rounded-md border border-border">
-            <button
-              onClick={() => setOpen(isOpen ? null : area.id)}
-              className="flex w-full items-center gap-2 bg-card px-2.5 py-2 text-left transition-colors hover:bg-secondary/60"
-              aria-expanded={isOpen}
-            >
-              <ChevronRight
-                className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-90")}
-              />
-              <span className="flex-1 truncate font-mono text-[13px] text-foreground">{area.name}</span>
-              <StatusDot status={area.status} />
-              <span className="font-mono text-[10px] text-muted-foreground">{area.dimensions}</span>
-            </button>
-
-            {isOpen && <ExportAreaDetails area={area} />}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function ExportAreaDetails({ area }: { area: ExportArea }) {
-  return (
-    <div className="border-t border-border bg-background/40 animate-in-fade">
-      {area.note && (
-        <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-warning">
-          <AlertTriangle className="size-3 shrink-0" />
-          {area.note}
-        </div>
-      )}
-      {area.outputs.map((out) => (
-        <div key={out.id} className="flex items-center gap-2 px-2.5 py-1.5">
-          <FileDown className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="flex-1 truncate font-mono text-[12px] text-foreground">{out.filename}</span>
-          <span className="font-mono text-[10px] text-muted-foreground">{out.size}</span>
-          <span className="w-12 text-right font-mono text-[10px] text-muted-foreground">{out.bytes}</span>
-        </div>
-      ))}
-      <div className="flex items-center gap-1.5 border-t border-border p-1.5">
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Export areas</span>
         <button
-          onClick={() => api.exportArea(area.id)}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary py-1.5 text-[12px] font-medium text-primary-foreground transition-transform active:scale-[0.98]"
-        >
-          <FileDown className="size-3.5" />
-          Export area
-        </button>
-        <button
-          onClick={() => api.runCommand("add-output")}
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          title="Add output"
-          aria-label="Add output"
+          onClick={() => execute("export_area.create", { name: "Export area" })}
+          className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          title="Add export area"
+          aria-label="Add export area"
         >
           <Plus className="size-4" />
         </button>
       </div>
+
+      <div className="flex-1 overflow-y-auto px-1.5 pb-2">
+        {isLoading && <p className="px-3 py-4 text-[13px] text-muted-foreground">Loading export areas…</p>}
+        {!isLoading && areas.length === 0 && (
+          <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">
+            No export areas yet. Use the export area tool or right-click the canvas to mark a region.
+          </p>
+        )}
+        {areas.map((area) => (
+          <ExportAreaRow
+            key={area.id}
+            area={area}
+            selected={selectedArea?.id === area.id}
+            renaming={renamingId === area.id}
+            onSelect={() => setSelected(area.id)}
+            onAction={(a) => handleAreaAction(a, area)}
+            onCommitRename={(name) => commitRename(area, name)}
+            onCancelRename={() => setRenamingId(null)}
+          />
+        ))}
+      </div>
+
+      {selectedArea ? (
+        <ExportInspector
+          area={selectedArea}
+          onAreaAction={(a) => handleAreaAction(a, selectedArea)}
+          onOutputAction={(a, output) => handleOutputAction(a, selectedArea, output)}
+          onCommitRename={(name) => commitRename(selectedArea, name)}
+          onSetOutputFormat={(output, format) => execute("output.update", { id: output.id, format })}
+          onSetOutputScale={(output, scale) => execute("output.update", { id: output.id, scale })}
+          onSetOutputQuality={(output, quality) => execute("output.update", { id: output.id, quality })}
+        />
+      ) : (
+        <div className="border-t border-border p-3" aria-label="Inspector">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Inspector</p>
+          <p className="text-[13px] text-muted-foreground">No selection.</p>
+        </div>
+      )}
     </div>
+  );
+}
+
+function ExportAreaRow({
+  area,
+  selected,
+  renaming,
+  onSelect,
+  onAction,
+  onCommitRename,
+  onCancelRename,
+}: {
+  area: ExportArea;
+  selected: boolean;
+  renaming: boolean;
+  onSelect: () => void;
+  onAction: (action: ExportAreaAction) => void;
+  onCommitRename: (name: string) => void;
+  onCancelRename: () => void;
+}) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+            selected ? "bg-primary/12 ring-1 ring-primary/30" : "hover:bg-secondary/70",
+          )}
+        >
+          <Frame className={cn("size-4 shrink-0", selected ? "text-primary" : "text-muted-foreground")} />
+          {renaming ? (
+            <NameInput
+              initial={area.name}
+              autoFocus
+              onCommit={onCommitRename}
+              onCancel={onCancelRename}
+              className="h-6 flex-1 rounded border border-border bg-background px-1.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          ) : (
+            <button
+              onClick={onSelect}
+              onDoubleClick={() => onAction("rename")}
+              className="flex flex-1 items-center gap-2 overflow-hidden text-left"
+              aria-pressed={selected}
+              aria-current={selected}
+            >
+              <span className="flex-1 truncate font-mono text-[13px] text-foreground">{area.name}</span>
+              <StatusDot status={area.status} />
+              <span className="font-mono text-[10px] text-muted-foreground">{area.dimensions}</span>
+            </button>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ExportAreaMenu onAction={onAction} />
+    </ContextMenu>
+  );
+}
+
+/** Right-click action list shared by export-area rows and the canvas. */
+function ExportAreaMenu({ onAction }: { onAction: (action: ExportAreaAction) => void }) {
+  return (
+    <ContextMenuContent>
+      <ContextMenuItem onSelect={() => onAction("export")}>
+        <FileDown />
+        Export area
+        <ContextMenuShortcut>⌘E</ContextMenuShortcut>
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={() => onAction("zoom")}>
+        <Maximize2 />
+        Zoom to area
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem onSelect={() => onAction("rename")}>
+        <Pencil />
+        Rename
+        <ContextMenuShortcut>F2</ContextMenuShortcut>
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={() => onAction("duplicate")}>
+        <Copy />
+        Duplicate
+        <ContextMenuShortcut>⌘D</ContextMenuShortcut>
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={() => onAction("add-output")}>
+        <Plus />
+        Add output
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem variant="destructive" onSelect={() => onAction("delete")}>
+        <Trash2 />
+        Delete
+      </ContextMenuItem>
+    </ContextMenuContent>
+  );
+}
+
+function ExportInspector({
+  area,
+  onAreaAction,
+  onOutputAction,
+  onCommitRename,
+  onSetOutputFormat,
+  onSetOutputScale,
+  onSetOutputQuality,
+}: {
+  area: ExportArea;
+  onAreaAction: (action: ExportAreaAction) => void;
+  onOutputAction: (action: OutputAction, output: Output) => void;
+  onCommitRename: (name: string) => void;
+  onSetOutputFormat: (output: Output, format: string) => void;
+  onSetOutputScale: (output: Output, scale: number) => void;
+  onSetOutputQuality: (output: Output, quality: number) => void;
+}) {
+  return (
+    <div className="max-h-[60%] shrink-0 overflow-y-auto border-t border-border p-3" aria-label="Inspector">
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Inspector</p>
+        {area.status === "warning" && (
+          <span className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-warning">
+            <AlertTriangle className="size-3" />
+            {area.warnings.length} warning{area.warnings.length === 1 ? "" : "s"}
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-2.5">
+        <Field label="Name">
+          <NameInput
+            key={`${area.id}:${area.name}`}
+            initial={area.name}
+            onCommit={onCommitRename}
+            className="h-7 w-full rounded border border-border bg-background px-1.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </Field>
+        <Field label="Size">
+          <Readonly>{area.dimensions}</Readonly>
+        </Field>
+        <Field label="Position">
+          <Readonly>{area.position}</Readonly>
+        </Field>
+        <Field label="Padding">
+          <Readonly>{area.padding}</Readonly>
+        </Field>
+        <Field label="Background">
+          <Readonly>{area.background}</Readonly>
+        </Field>
+      </div>
+
+      {/* Warnings come straight from core export preview metadata (REQ-039). */}
+      {area.warnings.length > 0 && (
+        <ul className="mt-2.5 space-y-1">
+          {area.warnings.map((warning) => (
+            <li
+              key={warning}
+              className="flex items-start gap-1.5 rounded-md bg-warning/10 px-2 py-1.5 text-[11px] text-warning"
+            >
+              <AlertTriangle className="mt-px size-3 shrink-0" />
+              {warning}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mb-1.5 mt-3 flex items-center justify-between">
+        <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          Outputs ({area.outputs.length})
+        </p>
+        <button
+          onClick={() => onAreaAction("add-output")}
+          className="flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          title="Add output"
+          aria-label="Add output"
+        >
+          <Plus className="size-3.5" />
+        </button>
+      </div>
+      {area.outputs.length === 0 ? (
+        <p className="rounded-md bg-secondary/40 px-2 py-1.5 text-[11px] text-muted-foreground">
+          No outputs. Add one to export this area.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {area.outputs.map((output) => (
+            <OutputCard
+              key={output.id}
+              output={output}
+              onAction={(a) => onOutputAction(a, output)}
+              onSetFormat={(format) => onSetOutputFormat(output, format)}
+              onSetScale={(scale) => onSetOutputScale(output, scale)}
+              onSetQuality={(quality) => onSetOutputQuality(output, quality)}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className="mt-3 grid grid-cols-2 gap-1.5 border-t border-border pt-3">
+        <InspectorButton onClick={() => onAreaAction("export")} icon={FileDown} label="Export" />
+        <InspectorButton onClick={() => onAreaAction("zoom")} icon={Maximize2} label="Zoom to" />
+        <InspectorButton onClick={() => onAreaAction("duplicate")} icon={Copy} label="Duplicate" />
+        <InspectorButton onClick={() => onAreaAction("delete")} icon={Trash2} label="Delete" destructive />
+      </div>
+    </div>
+  );
+}
+
+function OutputCard({
+  output,
+  onAction,
+  onSetFormat,
+  onSetScale,
+  onSetQuality,
+}: {
+  output: Output;
+  onAction: (action: OutputAction) => void;
+  onSetFormat: (format: string) => void;
+  onSetScale: (scale: number) => void;
+  onSetQuality: (quality: number) => void;
+}) {
+  const lossy = isLossyFormat(output.format);
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="rounded-md border border-border bg-card/60 p-2">
+          <div className="flex items-center gap-2">
+            <FileDown className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="flex-1 truncate font-mono text-[12px] text-foreground" title={output.destination ?? output.filename}>
+              {output.filename}
+            </span>
+            <span className="font-mono text-[10px] text-muted-foreground">{output.dimensions}</span>
+          </div>
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <SelectMenu
+              value={output.format}
+              label={`Format: ${output.format}`}
+              options={OUTPUT_FORMATS.map((f) => ({ value: f.label, label: f.label }))}
+              onSelect={(label) => onSetFormat(formatParam(label))}
+            />
+            <SelectMenu
+              value={output.scale}
+              label={`Scale: ${output.scale}`}
+              options={SCALE_PRESETS.map((s) => ({ value: s.label, label: s.label }))}
+              onSelect={(label) => onSetScale(SCALE_PRESETS.find((s) => s.label === label)?.value ?? 1)}
+            />
+            {lossy && <QualityInput value={output.quality ?? 80} onCommit={onSetQuality} />}
+          </div>
+          {output.destination && (
+            <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground" title={output.destination}>
+              → {output.destination}
+            </p>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => onAction("duplicate")}>
+          <Copy />
+          Duplicate
+          <ContextMenuShortcut>⌘D</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onAction("detach")}>
+          <Unlink />
+          Detach from area
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" onSelect={() => onAction("remove")}>
+          <Trash2 />
+          Remove
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/** Small labelled dropdown used for output format/scale selection. */
+function SelectMenu({
+  value,
+  label,
+  options,
+  onSelect,
+}: {
+  value: string;
+  label: string;
+  options: { value: string; label: string }[];
+  onSelect: (value: string) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className="flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[10px] text-foreground transition-colors hover:bg-secondary/70"
+          aria-label={label}
+        >
+          {value}
+          <ChevronDown className="size-3 text-muted-foreground" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-64 min-w-28 overflow-y-auto">
+        {options.map((option) => (
+          <DropdownMenuItem key={option.value} onSelect={() => onSelect(option.value)}>
+            {option.label}
+            {option.value === value && <Check className="ml-auto size-3.5 text-primary" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Quality field for lossy formats; commits a single undoable step on blur/Enter. */
+function QualityInput({ value, onCommit }: { value: number; onCommit: (quality: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  const commit = () => {
+    const next = Math.max(1, Math.min(100, Math.round(Number(draft) || value)));
+    if (next !== value) onCommit(next);
+    setDraft(String(next));
+  };
+
+  return (
+    <span className="flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
+      Q
+      <input
+        type="number"
+        min={1}
+        max={100}
+        value={draft}
+        aria-label="Output quality"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          }
+        }}
+        className="w-9 bg-transparent text-right font-mono text-[10px] text-foreground outline-none"
+      />
+    </span>
   );
 }
 
 function StatusDot({ status }: { status: ExportArea["status"] }) {
   if (status === "ready")
     return (
-      <span title="Up to date" className="flex items-center text-primary">
+      <span title="Ready to export" className="flex items-center text-primary">
         <Check className="size-3.5" />
       </span>
     );
-  if (status === "warning")
-    return (
-      <span title="Has warnings" className="flex items-center text-warning">
-        <AlertTriangle className="size-3.5" />
-      </span>
-    );
   return (
-    <span title="Source changed — re-export" className="flex items-center text-muted-foreground">
-      <RotateCcw className="size-3.5" />
+    <span title="Has warnings" className="flex items-center text-warning">
+      <AlertTriangle className="size-3.5" />
     </span>
   );
 }

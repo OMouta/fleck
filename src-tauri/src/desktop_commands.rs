@@ -1,9 +1,10 @@
 use fleck_core::command::{
     default_command_registry, CommandEngine, CommandId, CommandInvocation, CommandParameters,
 };
+use fleck_core::export::{preview_export_area, ExportWarning, OutputScale};
 use fleck_core::model::{
     AssetSource, ExportArea, ExportBackground, HistoryState, ImageObject, JsonValue, Layer,
-    ObjectId, OutputFormat, Rect, Workspace,
+    ObjectId, OutputFormat, Padding, Rect, Workspace,
 };
 use fleck_core::persistence::{
     load_package_from_path, save_package_to_path, LoadWarning, WorkspacePackage,
@@ -124,9 +125,12 @@ pub struct ExportAreaDto {
     id: String,
     name: String,
     dimensions: String,
+    position: String,
+    padding: String,
+    background: String,
     format: String,
     status: String,
-    note: Option<String>,
+    warnings: Vec<String>,
     outputs: Vec<OutputDto>,
 }
 
@@ -136,7 +140,10 @@ pub struct OutputDto {
     id: String,
     filename: String,
     format: String,
-    size: String,
+    scale: String,
+    quality: Option<u8>,
+    destination: Option<String>,
+    dimensions: String,
     bytes: String,
 }
 
@@ -777,22 +784,45 @@ fn image_object_dto(workspace: &Workspace, object: &ImageObject) -> ImageObjectD
 }
 
 fn export_area_dto(workspace: &Workspace, area: &ExportArea) -> ExportAreaDto {
-    let outputs = area
-        .output_ids
-        .iter()
-        .filter_map(|id| workspace.outputs.iter().find(|output| output.id == *id))
-        .map(|output| OutputDto {
-            id: output.id.as_str().to_owned(),
-            filename: output.filename.clone(),
-            format: format!("{:?}", output.format),
-            size: output
-                .width
-                .zip(output.height)
-                .map(|(width, height)| format!("{width} × {height}"))
-                .unwrap_or_else(|| format!("{}x", output.scale)),
-            bytes: "pending".to_owned(),
+    // Source warnings + per-output preview dimensions from core preview metadata
+    // so the UI consumes the same numbers/warnings the export pipeline would.
+    let preview = preview_export_area(workspace, &area.id).ok();
+    let quality_of = |output_id: &str| {
+        workspace
+            .outputs
+            .iter()
+            .find(|output| output.id.as_str() == output_id)
+            .and_then(|output| output.quality)
+    };
+    let outputs = preview
+        .as_ref()
+        .map(|preview| {
+            preview
+                .outputs
+                .iter()
+                .map(|output| OutputDto {
+                    id: output.output_id.as_str().to_owned(),
+                    filename: output.filename.clone(),
+                    format: output_format_label(output.format).to_owned(),
+                    scale: scale_label(output.scale),
+                    quality: quality_of(output.output_id.as_str()),
+                    destination: output.destination.clone(),
+                    dimensions: format!("{} × {} px", output.pixel_width, output.pixel_height),
+                    bytes: "pending".to_owned(),
+                })
+                .collect::<Vec<_>>()
         })
-        .collect::<Vec<_>>();
+        .unwrap_or_default();
+    let warnings = preview
+        .as_ref()
+        .map(|preview| {
+            preview
+                .warnings
+                .iter()
+                .map(export_warning_label)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     ExportAreaDto {
         id: area.id.as_str().to_owned(),
         name: area.name.clone(),
@@ -801,20 +831,84 @@ fn export_area_dto(workspace: &Workspace, area: &ExportArea) -> ExportAreaDto {
             area.bounds.width.round(),
             area.bounds.height.round()
         ),
+        position: format!("{}, {}", area.bounds.x.round(), area.bounds.y.round()),
+        padding: padding_label(&area.padding),
+        background: background_label(&area.background),
         format: outputs
             .first()
             .map(|output| output.format.clone())
-            .unwrap_or_else(|| "PNG".to_owned()),
-        status: if outputs.is_empty() {
-            "warning"
-        } else {
-            "ready"
-        }
-        .to_owned(),
-        note: outputs
-            .is_empty()
-            .then(|| "No outputs configured".to_owned()),
+            .unwrap_or_else(|| "—".to_owned()),
+        status: if warnings.is_empty() { "ready" } else { "warning" }.to_owned(),
+        warnings,
         outputs,
+    }
+}
+
+fn output_format_label(format: OutputFormat) -> &'static str {
+    match format {
+        OutputFormat::Png => "PNG",
+        OutputFormat::Jpeg => "JPEG",
+        OutputFormat::WebP => "WebP",
+        OutputFormat::Avif => "AVIF",
+        OutputFormat::Gif => "GIF",
+        OutputFormat::Bmp => "BMP",
+        OutputFormat::Tiff => "TIFF",
+        OutputFormat::Ico => "ICO",
+        OutputFormat::Icns => "ICNS",
+        OutputFormat::SvgRasterized => "SVG",
+        OutputFormat::Pdf => "PDF",
+    }
+}
+
+fn scale_label(scale: OutputScale) -> String {
+    let value = scale.numerator as f32 / scale.denominator as f32;
+    format!("{}×", (value * 1000.0).round() / 1000.0)
+}
+
+fn padding_label(padding: &Padding) -> String {
+    let (t, r, b, l) = (padding.top, padding.right, padding.bottom, padding.left);
+    if t == 0.0 && r == 0.0 && b == 0.0 && l == 0.0 {
+        "None".to_owned()
+    } else if t == r && r == b && b == l {
+        format!("{} px", round1(t))
+    } else {
+        format!(
+            "T{} R{} B{} L{}",
+            round1(t),
+            round1(r),
+            round1(b),
+            round1(l)
+        )
+    }
+}
+
+fn background_label(background: &ExportBackground) -> String {
+    match background {
+        ExportBackground::Transparent => "Transparent".to_owned(),
+        ExportBackground::Solid { color } => {
+            format!("Solid #{:02x}{:02x}{:02x}", color.r, color.g, color.b)
+        }
+        ExportBackground::CheckerboardPreview => "Checkerboard".to_owned(),
+    }
+}
+
+fn round1(value: f32) -> f32 {
+    (value * 10.0).round() / 10.0
+}
+
+fn export_warning_label(warning: &ExportWarning) -> String {
+    match warning {
+        ExportWarning::NoOutputs => "No outputs configured".to_owned(),
+        ExportWarning::NoParticipatingLayers => "No layers participate in this export".to_owned(),
+        ExportWarning::LayerIncludedAndExcluded { .. } => {
+            "A layer is both included and excluded".to_owned()
+        }
+        ExportWarning::JpegCannotPreserveTransparency { .. } => {
+            "JPEG cannot preserve transparency".to_owned()
+        }
+        ExportWarning::CheckerboardPreviewBackground { .. } => {
+            "Checkerboard is a preview-only background".to_owned()
+        }
     }
 }
 

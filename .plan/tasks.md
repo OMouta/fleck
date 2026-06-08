@@ -327,7 +327,7 @@ Acceptance criteria:
 
 ### TASK-FE-007: Build Export Area Tool, Exports Panel, And Export Inspector
 
-Status: open
+Status: done
 
 Requirements: REQ-037, REQ-039, REQ-041, REQ-043
 
