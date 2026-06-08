@@ -26,10 +26,44 @@ impl Default for DesktopState {
     }
 }
 
+#[cfg(test)]
+pub const REGISTERED_TAURI_COMMANDS: &[&str] = &[
+    "ownership_boundaries",
+    "get_workspace_meta",
+    "get_layers",
+    "get_image_objects",
+    "get_export_areas",
+    "get_history",
+    "get_commands",
+    "new_workspace",
+    "open_workspace",
+    "open_workspace_path",
+    "save_workspace",
+    "save_workspace_as",
+    "get_recent_files",
+    "pick_image_file",
+    "acquire_clipboard_asset",
+    "acquire_dropped_asset",
+    "acquire_replacement_asset",
+    "reveal_image_source",
+    "relink_asset",
+    "get_render_model",
+    "get_viewport_focus",
+    "create_export_area",
+    "export_area",
+    "export_all",
+    "run_command",
+    "undo",
+    "redo",
+    "jump_to_history",
+    "supports_history_jump",
+];
+
 struct DocumentState {
     package: WorkspacePackage,
     path: Option<PathBuf>,
     engine: CommandEngine,
+    dirty: bool,
 }
 
 impl DocumentState {
@@ -38,6 +72,7 @@ impl DocumentState {
             package: WorkspacePackage::new(Workspace::empty(generated_id("workspace"))),
             path: None,
             engine: CommandEngine::new(),
+            dirty: false,
         }
     }
 }
@@ -261,6 +296,7 @@ pub fn get_workspace_meta(
         Ok(workspace_meta(
             &document.package.workspace,
             document.path.as_deref(),
+            document.dirty,
         ))
     })
 }
@@ -367,6 +403,7 @@ pub fn save_workspace(state: tauri::State<'_, DesktopState>) -> Result<(), Strin
     };
     save_package_to_path(&document.package, &path).map_err(|error| error.to_string())?;
     document.path = Some(path);
+    document.dirty = false;
     Ok(())
 }
 
@@ -382,6 +419,7 @@ pub fn save_workspace_as(state: tauri::State<'_, DesktopState>) -> Result<Option
     let mut document = state.inner.lock().map_err(|_| "document lock poisoned")?;
     save_package_to_path(&document.package, &path).map_err(|error| error.to_string())?;
     document.path = Some(path.clone());
+    document.dirty = false;
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
@@ -505,6 +543,7 @@ pub fn create_export_area(state: tauri::State<'_, DesktopState>) -> Result<(), S
         tags: Vec::new(),
         preset_id: None,
     });
+    document.dirty = true;
     Ok(())
 }
 
@@ -567,6 +606,9 @@ pub fn run_command(
         )
         .map_err(|error| error.to_string());
     document.package.workspace = workspace;
+    if execution.is_ok() {
+        document.dirty = true;
+    }
     execution.map(|execution| CommandExecutionDto {
         command_id: execution.command_id.as_str().to_owned(),
         operation_label: execution.operation_label,
@@ -589,6 +631,9 @@ pub fn undo(state: tauri::State<'_, DesktopState>) -> Result<Option<CommandExecu
         Err(error) => Err(error.to_string()),
     };
     document.package.workspace = workspace;
+    if matches!(execution, Ok(Some(_))) {
+        document.dirty = true;
+    }
     execution
 }
 
@@ -608,6 +653,9 @@ pub fn redo(state: tauri::State<'_, DesktopState>) -> Result<Option<CommandExecu
         Err(error) => Err(error.to_string()),
     };
     document.package.workspace = workspace;
+    if matches!(execution, Ok(Some(_))) {
+        document.dirty = true;
+    }
     execution
 }
 
@@ -650,6 +698,7 @@ fn open_workspace_path_inner(
     document.package = outcome.package;
     document.path = Some(path);
     document.engine = CommandEngine::new();
+    document.dirty = false;
     Ok(result)
 }
 
@@ -661,13 +710,13 @@ fn with_document<T>(
     f(&document)
 }
 
-fn workspace_meta(workspace: &Workspace, path: Option<&Path>) -> WorkspaceMetaDto {
+fn workspace_meta(workspace: &Workspace, path: Option<&Path>, dirty: bool) -> WorkspaceMetaDto {
     let bounds = default_canvas_rect(workspace);
     WorkspaceMetaDto {
         name: path
             .map(file_name)
             .unwrap_or_else(|| workspace.metadata.name.clone()),
-        dirty: false,
+        dirty,
         layer_count: workspace.layers.len(),
         selected_count: workspace.selections.len(),
         canvas_size: format!("{} × {} px", bounds.width.round(), bounds.height.round()),
@@ -826,6 +875,19 @@ fn render_model(workspace: &Workspace) -> RenderModelDto {
                 opacity: layer.opacity,
                 visible: layer.visible,
             })
+            .chain(
+                workspace
+                    .image_objects
+                    .iter()
+                    .enumerate()
+                    .map(|(index, object)| RenderLayerDto {
+                        id: object.id.as_str().to_owned(),
+                        rect: rect_dto(image_object_rect(object)),
+                        color: render_color(index + workspace.layers.len()),
+                        opacity: object.opacity,
+                        visible: true,
+                    }),
+            )
             .collect(),
         export_areas: workspace
             .export_areas
@@ -860,6 +922,7 @@ fn default_canvas_rect(workspace: &Workspace) -> Rect {
         .layers
         .iter()
         .map(layer_workspace_rect)
+        .chain(workspace.image_objects.iter().map(image_object_rect))
         .reduce(union_rect)
         .unwrap_or(Rect {
             x: 0.0,
@@ -867,6 +930,15 @@ fn default_canvas_rect(workspace: &Workspace) -> Rect {
             width: 1024.0,
             height: 768.0,
         })
+}
+
+fn image_object_rect(object: &ImageObject) -> Rect {
+    Rect {
+        x: object.position.x,
+        y: object.position.y,
+        width: object.scale.width,
+        height: object.scale.height,
+    }
 }
 
 fn layer_workspace_rect(layer: &Layer) -> Rect {

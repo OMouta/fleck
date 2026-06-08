@@ -19,6 +19,72 @@ fn ownership_boundaries() -> Vec<(String, String)> {
         .collect()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::desktop_commands::REGISTERED_TAURI_COMMANDS;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn frontend_bridge_commands_are_registered_in_tauri() {
+        let api_source = include_str!("../../src/lib/api.ts");
+        let lib_source = include_str!("lib.rs");
+        let invoked = bridge_commands(api_source);
+        let registered = REGISTERED_TAURI_COMMANDS
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let handler = handler_commands(lib_source);
+        let missing = invoked.difference(&registered).copied().collect::<Vec<_>>();
+        let not_in_handler = registered.difference(&handler).copied().collect::<Vec<_>>();
+
+        assert!(
+            missing.is_empty(),
+            "frontend bridge commands missing from Tauri registration: {missing:?}"
+        );
+        assert!(
+            not_in_handler.is_empty(),
+            "registered Tauri commands missing from generate_handler!: {not_in_handler:?}"
+        );
+    }
+
+    fn bridge_commands(source: &str) -> BTreeSet<&str> {
+        source
+            .match_indices("bridge(\"")
+            .filter_map(|(index, marker)| {
+                let start = index + marker.len();
+                let rest = &source[start..];
+                let end = rest.find('"')?;
+                Some(&rest[..end])
+            })
+            .collect()
+    }
+
+    fn handler_commands(source: &str) -> BTreeSet<&str> {
+        let invoke_start = source
+            .rfind(".invoke_handler(")
+            .expect("invoke_handler block exists");
+        let source = &source[invoke_start..];
+        let start = source
+            .find("tauri::generate_handler![")
+            .expect("generate_handler block exists");
+        let rest = &source[start..];
+        let open = rest.find('[').expect("generate_handler opening bracket");
+        let close = rest[open..]
+            .find(']')
+            .expect("generate_handler closing bracket");
+        rest[open + 1..open + close]
+            .split(',')
+            .filter_map(|entry| {
+                let name = entry.trim();
+                if name.is_empty() {
+                    return None;
+                }
+                Some(name.rsplit("::").next().unwrap_or(name))
+            })
+            .collect()
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn build_macos_menu<R: tauri::Runtime, M: tauri::Manager<R>>(
     manager: &M,
