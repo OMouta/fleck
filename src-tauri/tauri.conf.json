@@ -22,7 +22,7 @@
         "hiddenTitle": true,
         "trafficLightPosition": {
           "x": 16,
-          "y": 15
+          "y": 25
         },
         "shadow": true
       }
