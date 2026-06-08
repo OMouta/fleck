@@ -56,8 +56,9 @@ export async function pasteImageFlow(): Promise<void> {
 }
 
 /** Place an image file dropped onto the workspace as an embedded image object. */
-export async function dropImageFlow(name: string): Promise<void> {
-  const acquired = await api.acquireDroppedAsset(name);
+export async function dropImageFlow(file: File): Promise<void> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const acquired = await api.acquireDroppedAsset(file.name, bytes);
   if (!acquired) return;
   await useCommandStore.getState().execute("image.import_drag_drop", {
     asset_id: acquired.assetId,

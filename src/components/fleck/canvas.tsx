@@ -361,7 +361,7 @@ export function Canvas() {
     e.preventDefault();
     setDragOver(false);
     const file = Array.from(e.dataTransfer.files).find((f) => f.type.startsWith("image/"));
-    if (file) dropImageFlow(file.name);
+    if (file) void dropImageFlow(file);
   };
 
   const cursor = panning

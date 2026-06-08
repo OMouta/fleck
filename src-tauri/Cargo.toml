@@ -19,8 +19,11 @@ path = "src/main.rs"
 tauri-build = { version = "2.4.1", features = [] }
 
 [dependencies]
+arboard = "3.4"
 base64 = "0.22.1"
+dirs = "5.0"
 fleck-core = { path = "../crates/fleck-core" }
+image = "0.25"
 fleck-render = { path = "../crates/fleck-render" }
 rfd = "0.15.4"
 serde = { version = "1.0.228", features = ["derive"] }

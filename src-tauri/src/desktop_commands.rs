@@ -1,8 +1,10 @@
+use arboard::{Clipboard, ImageData};
 use base64::{engine::general_purpose, Engine as _};
 use fleck_core::command::{
     default_command_registry, CommandEngine, CommandId, CommandInvocation, CommandParameters,
 };
 use fleck_core::export::{preview_export_area, ExportWarning, OutputScale};
+use fleck_core::image_import;
 use fleck_core::model::{
     AssetSource, ExportArea, ExportBackground, HistoryState, ImageObject, JsonValue, Layer,
     ObjectId, OutputFormat, Padding, Rect, TransparencyBehavior, Workspace,
@@ -10,9 +12,13 @@ use fleck_core::model::{
 use fleck_core::persistence::{
     load_package_from_path, save_package_to_path, LoadWarning, WorkspacePackage,
 };
-use fleck_render::{DefaultExportOptions, SkiaViewportRenderer};
+use fleck_render::{DefaultExportOptions, EncodedExport, SkiaViewportRenderer};
+use image::{ImageBuffer, Rgba};
 use serde::Serialize;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::fs;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -68,6 +74,10 @@ struct DocumentState {
     path: Option<PathBuf>,
     engine: CommandEngine,
     dirty: bool,
+    /// Cache of the most recent export job's encoded outputs, indexed by the
+    /// `filename` we use as the output id in the frontend `ExportResult`.
+    /// Used by `copy_export_result` so we don't re-run the pipeline to copy.
+    last_export: Vec<EncodedExport>,
 }
 
 impl DocumentState {
@@ -77,6 +87,7 @@ impl DocumentState {
             path: None,
             engine: CommandEngine::new(),
             dirty: false,
+            last_export: Vec::new(),
         }
     }
 }
@@ -454,8 +465,10 @@ pub fn save_workspace(state: tauri::State<'_, DesktopState>) -> Result<(), Strin
         }
     };
     save_package_to_path(&document.package, &path).map_err(|error| error.to_string())?;
-    document.path = Some(path);
+    document.path = Some(path.clone());
     document.dirty = false;
+    drop(document);
+    push_recent_file(&path);
     Ok(())
 }
 
@@ -472,25 +485,24 @@ pub fn save_workspace_as(state: tauri::State<'_, DesktopState>) -> Result<Option
     save_package_to_path(&document.package, &path).map_err(|error| error.to_string())?;
     document.path = Some(path.clone());
     document.dirty = false;
+    drop(document);
+    push_recent_file(&path);
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
 pub fn get_recent_files(
-    state: tauri::State<'_, DesktopState>,
+    _state: tauri::State<'_, DesktopState>,
 ) -> Result<Vec<RecentFileDto>, String> {
-    with_document(&state, |document| {
-        Ok(document
-            .path
-            .as_ref()
-            .map(|path| RecentFileDto {
-                path: path.to_string_lossy().into_owned(),
-                name: file_name(path),
-                opened_at: "current session".to_owned(),
-            })
-            .into_iter()
-            .collect())
-    })
+    Ok(read_recent_files()
+        .into_iter()
+        .filter(|entry| Path::new(&entry.path).exists())
+        .map(|entry| RecentFileDto {
+            name: file_name(Path::new(&entry.path)),
+            path: entry.path,
+            opened_at: relative_time(entry.opened_at_secs),
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -504,28 +516,119 @@ pub fn pick_image_file() -> Result<Option<String>, String> {
         .map(|path| path.to_string_lossy().into_owned()))
 }
 
-#[tauri::command]
-pub fn acquire_clipboard_asset() -> Result<Option<serde_json::Value>, String> {
-    Ok(None)
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcquiredAssetDto {
+    asset_id: String,
+    name: String,
 }
 
 #[tauri::command]
-pub fn acquire_dropped_asset(_name: String) -> Result<Option<serde_json::Value>, String> {
-    Ok(None)
+pub fn acquire_clipboard_asset(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Option<AcquiredAssetDto>, String> {
+    let image = match Clipboard::new()
+        .map_err(|error| format!("clipboard unavailable: {error}"))?
+        .get_image()
+    {
+        Ok(image) => image,
+        Err(arboard::Error::ContentNotAvailable) => return Ok(None),
+        Err(error) => return Err(format!("clipboard read failed: {error}")),
+    };
+    let bytes = encode_rgba_to_png(&image)?;
+    let name = format!("pasted-{}.png", short_timestamp());
+    Ok(Some(register_acquired_asset(&state, &name, bytes)?))
 }
 
 #[tauri::command]
-pub fn acquire_replacement_asset() -> Result<Option<String>, String> {
-    Ok(None)
+pub fn acquire_dropped_asset(
+    state: tauri::State<'_, DesktopState>,
+    name: String,
+    bytes: Vec<u8>,
+) -> Result<Option<AcquiredAssetDto>, String> {
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(register_acquired_asset(&state, &name, bytes)?))
+}
+
+#[tauri::command]
+pub fn acquire_replacement_asset(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Option<String>, String> {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter(
+            "Images",
+            &["png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "ico"],
+        )
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+    let name = file_name(&path);
+    let asset = register_acquired_asset(&state, &name, bytes)?;
+    Ok(Some(asset.asset_id))
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn reveal_image_source(_object_id: String) -> Result<(), String> {
-    Ok(())
+pub fn reveal_image_source(
+    state: tauri::State<'_, DesktopState>,
+    object_id: String,
+) -> Result<(), String> {
+    let document = state.inner.lock().map_err(|_| "document lock poisoned")?;
+    let id = ObjectId::new(object_id).map_err(|error| error.to_string())?;
+    let object = document
+        .package
+        .workspace
+        .image_objects
+        .iter()
+        .find(|object| object.id == id)
+        .ok_or_else(|| format!("image object `{}` was not found", id))?;
+    let asset = document
+        .package
+        .workspace
+        .assets
+        .iter()
+        .find(|asset| asset.id == object.source_asset_id)
+        .ok_or_else(|| "image object has no resolved asset".to_owned())?;
+    let path = match &asset.source {
+        AssetSource::Linked { path } => PathBuf::from(path),
+        AssetSource::Embedded { .. } => {
+            return Err("embedded assets have no on-disk source to reveal".to_owned())
+        }
+    };
+    drop(document);
+    tauri_plugin_opener::reveal_item_in_dir(&path).map_err(|error| error.to_string())
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn relink_asset(_asset_id: String) -> Result<(), String> {
+pub fn relink_asset(
+    state: tauri::State<'_, DesktopState>,
+    asset_id: String,
+) -> Result<(), String> {
+    let Some(new_path) = rfd::FileDialog::new()
+        .add_filter(
+            "Images",
+            &["png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "ico"],
+        )
+        .pick_file()
+    else {
+        return Ok(());
+    };
+    let id = ObjectId::new(asset_id).map_err(|error| error.to_string())?;
+    let mut document = state.inner.lock().map_err(|_| "document lock poisoned")?;
+    let asset = document
+        .package
+        .workspace
+        .assets
+        .iter_mut()
+        .find(|asset| asset.id == id)
+        .ok_or_else(|| format!("asset `{}` was not found", id))?;
+    asset.source = AssetSource::Linked {
+        path: new_path.to_string_lossy().into_owned(),
+    };
+    document.dirty = true;
     Ok(())
 }
 
@@ -602,62 +705,118 @@ pub fn export_area(
     state: tauri::State<'_, DesktopState>,
     id: String,
 ) -> Result<ExportResultDto, String> {
-    with_document(&state, |document| {
-        let workspace = &document.package.workspace;
-        let id = ObjectId::new(id).map_err(|error| error.to_string())?;
-        let scope = workspace
-            .export_areas
-            .iter()
-            .find(|area| area.id == id)
-            .map(|area| area.name.clone())
-            .unwrap_or_else(|| "Export area".to_owned());
-        let warnings = preview_export_area(workspace, &id)
-            .map(|preview| preview.warnings.iter().map(export_warning_label).collect())
-            .unwrap_or_default();
-        match SkiaViewportRenderer::new().export_area(workspace, &id) {
-            Ok(encoded) => Ok(export_result_dto(scope, encoded, warnings)),
-            // An area with no outputs is a no-op job, not an error — report it.
-            Err(fleck_render::ExportPipelineError::AreaHasNoOutputs { .. }) => {
-                Ok(export_result_dto(scope, Vec::new(), warnings))
-            }
-            Err(error) => Err(error.to_string()),
+    let mut document = state.inner.lock().map_err(|_| "document lock poisoned")?;
+    let workspace = &document.package.workspace;
+    let id = ObjectId::new(id).map_err(|error| error.to_string())?;
+    let scope = workspace
+        .export_areas
+        .iter()
+        .find(|area| area.id == id)
+        .map(|area| area.name.clone())
+        .unwrap_or_else(|| "Export area".to_owned());
+    let warnings = preview_export_area(workspace, &id)
+        .map(|preview| preview.warnings.iter().map(export_warning_label).collect())
+        .unwrap_or_default();
+    match SkiaViewportRenderer::new().export_area(workspace, &id) {
+        Ok(encoded) => {
+            document.last_export = encoded.clone();
+            Ok(export_result_dto(scope, encoded, warnings))
         }
-    })
+        // An area with no outputs is a no-op job, not an error — report it.
+        Err(fleck_render::ExportPipelineError::AreaHasNoOutputs { .. }) => {
+            Ok(export_result_dto(scope, Vec::new(), warnings))
+        }
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 #[tauri::command]
 pub fn export_all(state: tauri::State<'_, DesktopState>) -> Result<ExportResultDto, String> {
-    with_document(&state, |document| {
-        match SkiaViewportRenderer::new().export_all(
-            &document.package.workspace,
-            &DefaultExportOptions::default(),
-        ) {
-            Ok(encoded) => Ok(export_result_dto(
+    let mut document = state.inner.lock().map_err(|_| "document lock poisoned")?;
+    match SkiaViewportRenderer::new().export_all(
+        &document.package.workspace,
+        &DefaultExportOptions::default(),
+    ) {
+        Ok(encoded) => {
+            document.last_export = encoded.clone();
+            Ok(export_result_dto(
                 "All areas".to_owned(),
                 encoded,
                 Vec::new(),
-            )),
-            Err(fleck_render::ExportPipelineError::NoExportableContent) => Ok(export_result_dto(
-                "All areas".to_owned(),
-                Vec::new(),
-                vec!["No visible exportable content".to_owned()],
-            )),
-            Err(error) => Err(error.to_string()),
+            ))
         }
-    })
+        Err(fleck_render::ExportPipelineError::NoExportableContent) => Ok(export_result_dto(
+            "All areas".to_owned(),
+            Vec::new(),
+            vec!["No visible exportable content".to_owned()],
+        )),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
-/// Reveal a produced output in the OS file manager. Real native reveal is
-/// Tauri-backed (TASK-020); this stub keeps the frontend contract registered.
 #[tauri::command(rename_all = "camelCase")]
-pub fn reveal_exported_file(_destination: String) -> Result<(), String> {
-    Ok(())
+pub fn reveal_exported_file(destination: String) -> Result<(), String> {
+    tauri_plugin_opener::reveal_item_in_dir(PathBuf::from(destination))
+        .map_err(|error| error.to_string())
 }
 
-/// Copy an export result to the clipboard. Real native clipboard access is
-/// Tauri-backed (TASK-020); this stub keeps the frontend contract registered.
 #[tauri::command(rename_all = "camelCase")]
-pub fn copy_export_result(_output_id: String, _mode: String) -> Result<(), String> {
+pub fn copy_export_result(
+    state: tauri::State<'_, DesktopState>,
+    output_id: String,
+    mode: String,
+) -> Result<(), String> {
+    // Look up the last-export cache. We use the `filename` field as the id the
+    // frontend received in `ExportResult.outputs[i].id`.
+    let document = state.inner.lock().map_err(|_| "document lock poisoned")?;
+    let export = document
+        .last_export
+        .iter()
+        .find(|export| export.filename == output_id)
+        .cloned()
+        .ok_or_else(|| {
+            "no cached export for this output \u{2014} run the export again first".to_owned()
+        })?;
+    drop(document);
+
+    let mut clipboard =
+        Clipboard::new().map_err(|error| format!("clipboard unavailable: {error}"))?;
+    match mode.as_str() {
+        "image" => {
+            let decoded = image::load_from_memory(&export.bytes)
+                .map_err(|error| format!("decode export for clipboard: {error}"))?
+                .to_rgba8();
+            let (width, height) = decoded.dimensions();
+            clipboard
+                .set_image(ImageData {
+                    width: width as usize,
+                    height: height as usize,
+                    bytes: Cow::Owned(decoded.into_raw()),
+                })
+                .map_err(|error| format!("clipboard write failed: {error}"))?;
+        }
+        "base64" => {
+            let encoded = general_purpose::STANDARD.encode(&export.bytes);
+            clipboard
+                .set_text(encoded)
+                .map_err(|error| format!("clipboard write failed: {error}"))?;
+        }
+        "markdown" => {
+            let media = match export.format {
+                OutputFormat::Jpeg => "image/jpeg",
+                OutputFormat::WebP => "image/webp",
+                OutputFormat::Gif => "image/gif",
+                OutputFormat::Bmp => "image/bmp",
+                _ => "image/png",
+            };
+            let encoded = general_purpose::STANDARD.encode(&export.bytes);
+            let markdown = format!("![{}](data:{};base64,{})", export.filename, media, encoded);
+            clipboard
+                .set_text(markdown)
+                .map_err(|error| format!("clipboard write failed: {error}"))?;
+        }
+        other => return Err(format!("unknown copy mode `{other}`")),
+    }
     Ok(())
 }
 
@@ -806,9 +965,11 @@ fn open_workspace_path_inner(
     };
     let mut document = state.inner.lock().map_err(|_| "document lock poisoned")?;
     document.package = outcome.package;
-    document.path = Some(path);
+    document.path = Some(path.clone());
     document.engine = CommandEngine::new();
     document.dirty = false;
+    drop(document);
+    push_recent_file(&path);
     Ok(result)
 }
 
@@ -1320,6 +1481,130 @@ fn json_value(value: serde_json::Value) -> JsonValue {
                 .map(|(key, value)| (key, json_value(value)))
                 .collect(),
         ),
+    }
+}
+
+/// Register an embedded image asset on the open workspace and return its id +
+/// name. Shared by clipboard, drag/drop, and replace flows so they all produce
+/// assets the subsequent `image.import_*` / `image.replace_source` core
+/// commands can find.
+fn register_acquired_asset(
+    state: &tauri::State<'_, DesktopState>,
+    name: &str,
+    bytes: Vec<u8>,
+) -> Result<AcquiredAssetDto, String> {
+    let asset_id = generated_id("asset");
+    let mut document = state.inner.lock().map_err(|_| "document lock poisoned")?;
+    image_import::register_embedded_asset(
+        &mut document.package,
+        asset_id.clone(),
+        name.to_owned(),
+        bytes,
+    )
+    .map_err(|error| error.to_string())?;
+    document.dirty = true;
+    Ok(AcquiredAssetDto {
+        asset_id: asset_id.as_str().to_owned(),
+        name: name.to_owned(),
+    })
+}
+
+fn encode_rgba_to_png(image: &ImageData<'_>) -> Result<Vec<u8>, String> {
+    let buffer: ImageBuffer<Rgba<u8>, Vec<u8>> =
+        ImageBuffer::from_raw(image.width as u32, image.height as u32, image.bytes.to_vec())
+            .ok_or_else(|| "clipboard image had unexpected byte length".to_owned())?;
+    let mut encoded = Vec::with_capacity(image.bytes.len());
+    buffer
+        .write_to(&mut Cursor::new(&mut encoded), image::ImageFormat::Png)
+        .map_err(|error| format!("encode clipboard image: {error}"))?;
+    Ok(encoded)
+}
+
+fn short_timestamp() -> String {
+    format!("{:x}", unique_suffix())
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+struct RecentEntry {
+    path: String,
+    opened_at_secs: u64,
+}
+
+const RECENT_FILES_LIMIT: usize = 10;
+
+fn recent_files_path() -> Option<PathBuf> {
+    let mut dir = dirs::config_dir()?;
+    dir.push("fleck");
+    fs::create_dir_all(&dir).ok()?;
+    dir.push("recent.json");
+    Some(dir)
+}
+
+fn read_recent_files() -> Vec<RecentEntry> {
+    let Some(path) = recent_files_path() else {
+        return Vec::new();
+    };
+    let Ok(text) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+fn push_recent_file(path: &Path) {
+    let Some(store) = recent_files_path() else {
+        return;
+    };
+    let canonical = path.to_string_lossy().into_owned();
+    let mut entries = read_recent_files();
+    entries.retain(|entry| entry.path != canonical);
+    entries.insert(
+        0,
+        RecentEntry {
+            path: canonical,
+            opened_at_secs: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs())
+                .unwrap_or_default(),
+        },
+    );
+    entries.truncate(RECENT_FILES_LIMIT);
+    let Ok(text) = serde_json::to_string_pretty(&entries) else {
+        return;
+    };
+    let _ = fs::write(&store, text);
+}
+
+fn relative_time(secs: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    let delta = now.saturating_sub(secs);
+    if delta < 60 {
+        "just now".to_owned()
+    } else if delta < 3600 {
+        format!("{} minutes ago", delta / 60)
+    } else if delta < 86_400 {
+        let hours = delta / 3600;
+        if hours == 1 {
+            "1 hour ago".to_owned()
+        } else {
+            format!("{hours} hours ago")
+        }
+    } else if delta < 7 * 86_400 {
+        let days = delta / 86_400;
+        if days == 1 {
+            "yesterday".to_owned()
+        } else {
+            format!("{days} days ago")
+        }
+    } else {
+        let weeks = delta / (7 * 86_400);
+        if weeks == 1 {
+            "1 week ago".to_owned()
+        } else {
+            format!("{weeks} weeks ago")
+        }
     }
 }
 

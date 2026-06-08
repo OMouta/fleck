@@ -69,8 +69,12 @@ export const api = {
 
   pickImageFile: () => call<string | null>("pick_image_file"),
   acquireClipboardAsset: () => call<{ assetId: string; name: string } | null>("acquire_clipboard_asset"),
-  acquireDroppedAsset: (name: string) =>
-    call<{ assetId: string; name: string } | null>("acquire_dropped_asset", { name }),
+  acquireDroppedAsset: (name: string, bytes: Uint8Array) =>
+    call<{ assetId: string; name: string } | null>("acquire_dropped_asset", {
+      name,
+      // Tauri 2 forwards typed arrays as Vec<u8> on the Rust side.
+      bytes: Array.from(bytes),
+    }),
   acquireReplacementAsset: () => call<string | null>("acquire_replacement_asset"),
   revealImageSource: (objectId: string) => call<void>("reveal_image_source", { objectId }),
 

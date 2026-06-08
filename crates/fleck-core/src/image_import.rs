@@ -279,6 +279,41 @@ pub fn rasterize_image_object(
     Ok(())
 }
 
+/// Decode `bytes` and register them as an embedded asset on `package`, without
+/// placing an image object. The asset id and name are caller-supplied; returns
+/// the decoded metadata so the caller can confirm dimensions/format.
+pub fn register_embedded_asset(
+    package: &mut WorkspacePackage,
+    asset_id: ObjectId,
+    name: String,
+    bytes: Vec<u8>,
+) -> ImageImportResult<(Asset, DecodedImage)> {
+    let decoded = decode_image_bytes(&bytes)?;
+    ensure_asset_id_available(&package.workspace, &asset_id)?;
+    let digest = digest_for_bytes(&bytes);
+    let asset = Asset {
+        id: asset_id.clone(),
+        name,
+        source: AssetSource::Embedded {
+            digest: Some(digest.clone()),
+        },
+        media_type: decoded
+            .metadata
+            .format
+            .and_then(media_type_for_format)
+            .map(str::to_owned),
+        color_profile: None,
+        image_metadata: Some(decoded.metadata.clone()),
+    };
+    package.workspace.assets.push(asset.clone());
+    package.embedded_assets.push(EmbeddedAssetBlob {
+        asset_id,
+        digest: Some(digest),
+        bytes,
+    });
+    Ok((asset, decoded))
+}
+
 pub fn reveal_asset_path(
     workspace: &Workspace,
     asset_id: &ObjectId,
