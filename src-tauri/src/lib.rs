@@ -1,3 +1,5 @@
+mod desktop_commands;
+
 #[cfg(target_os = "macos")]
 use tauri::{
     menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
@@ -128,7 +130,38 @@ fn build_macos_menu<R: tauri::Runtime, M: tauri::Manager<R>>(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![ownership_boundaries])
+        .manage(desktop_commands::DesktopState::default())
+        .invoke_handler(tauri::generate_handler![
+            ownership_boundaries,
+            desktop_commands::get_workspace_meta,
+            desktop_commands::get_layers,
+            desktop_commands::get_image_objects,
+            desktop_commands::get_export_areas,
+            desktop_commands::get_history,
+            desktop_commands::get_commands,
+            desktop_commands::new_workspace,
+            desktop_commands::open_workspace,
+            desktop_commands::open_workspace_path,
+            desktop_commands::save_workspace,
+            desktop_commands::save_workspace_as,
+            desktop_commands::get_recent_files,
+            desktop_commands::pick_image_file,
+            desktop_commands::acquire_clipboard_asset,
+            desktop_commands::acquire_dropped_asset,
+            desktop_commands::acquire_replacement_asset,
+            desktop_commands::reveal_image_source,
+            desktop_commands::relink_asset,
+            desktop_commands::get_render_model,
+            desktop_commands::get_viewport_focus,
+            desktop_commands::create_export_area,
+            desktop_commands::export_area,
+            desktop_commands::export_all,
+            desktop_commands::run_command,
+            desktop_commands::undo,
+            desktop_commands::redo,
+            desktop_commands::jump_to_history,
+            desktop_commands::supports_history_jump
+        ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
