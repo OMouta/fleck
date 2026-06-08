@@ -15,10 +15,10 @@ use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use image::codecs::webp::WebPEncoder;
 use image::{ExtendedColorType, ImageEncoder};
-use skia_safe::surfaces;
+use skia_safe::{images, surfaces};
 use skia_safe::{
-    AlphaType, BlendMode as SkBlendMode, Canvas, Color, ColorType, IPoint, ImageInfo, Paint,
-    PaintStyle, Rect as SkRect, Surface,
+    AlphaType, BlendMode as SkBlendMode, Canvas, Color, ColorType, Data, IPoint, Image, ImageInfo,
+    Paint, PaintStyle, Rect as SkRect, Surface,
 };
 
 const CHECKERBOARD_CELL_SIZE: f32 = 16.0;
@@ -685,10 +685,29 @@ fn draw_layer_preview(canvas: &Canvas, viewport: &Viewport, layer: &Layer, index
     if let Some(rect) = layer_rect_to_screen(viewport, layer) {
         let mut paint = Paint::default();
         paint.set_anti_alias(false);
-        paint.set_color(layer_preview_color(index, layer.opacity));
         paint.set_blend_mode(blend_mode_to_skia(layer.blend_mode));
-        canvas.draw_rect(rect, &paint);
+        if let Some(image) = layer.raster.as_ref().and_then(layer_image) {
+            paint.set_alpha_f(layer.opacity.clamp(0.0, 1.0));
+            canvas.draw_image_rect(image, None, rect, &paint);
+        } else {
+            paint.set_color(layer_preview_color(index, layer.opacity));
+            canvas.draw_rect(rect, &paint);
+        }
     }
+}
+
+fn layer_image(raster: &fleck_core::model::RasterPixels) -> Option<Image> {
+    let info = ImageInfo::new(
+        (raster.width as i32, raster.height as i32),
+        ColorType::RGBA8888,
+        AlphaType::Unpremul,
+        None,
+    );
+    images::raster_from_data(
+        &info,
+        Data::new_copy(&raster.pixels),
+        raster.width as usize * 4,
+    )
 }
 
 fn draw_overlays(canvas: &Canvas, request: RenderRequest<'_>, summary: &mut OverlaySummary) {
@@ -1336,6 +1355,7 @@ mod tests {
             mask_layer_id: None,
             group_id: None,
             export_participation: ExportParticipation::Included,
+            raster: None,
         }
     }
 

@@ -38,8 +38,13 @@ Source: `.plan/spec.md`
 
 - DEC-011-selection-pixel-buffer: TASK-011 implements selection mask state, geometry operations, undoable command hooks, and conversion/export bounds, but destructive selected-pixel operations are metadata-only until raster layers carry editable pixel buffers.
   - Affected requirements: REQ-008 (delete/copy/move selected pixels), REQ-016 (pixel movement).
-  - Reason: the current `Layer` model stores layer bounds and preview metadata, not per-layer pixel buffers. Writing true selected-pixel deletion, copy payloads, or move extraction here would require inventing the pixel editing substrate that TASK-012 owns.
-  - Resolution path: TASK-012 should apply `SelectionMask` alpha data to real layer pixels for delete, copy, move/nudge/duplicate, paste-into-selection, and transform operations. TASK-011 command IDs and mask data are the integration points.
+  - Reason: at TASK-011 time, the `Layer` model stored layer bounds and preview metadata, not per-layer pixel buffers. Writing true selected-pixel deletion, copy payloads, or move extraction there would have required inventing the pixel editing substrate that TASK-012 owned.
+  - Resolution path: partially resolved by TASK-012, which adds layer raster buffers and selection-masked pixel writes. Selection-specific move extraction/duplication/paste remains a later refinement.
+
+- DEC-012-pixel-tools-mvp: TASK-012 implements practical raster tool backends with simple local algorithms rather than production-grade photo-editing quality.
+  - Affected requirements: REQ-015, REQ-016, REQ-048.
+  - Reason: Fleck is still building the core substrate. The smallest useful implementation is an undoable RGBA raster buffer with deterministic tools, selection masking, and renderer/export visibility. Advanced brush engines, high-quality healing, transform handles, asynchronous stroke coalescing, and tuned performance budgets belong in later focused work.
+  - Resolution path: TASK-023 should add benchmark budgets for representative brush strokes and large edits; future pixel-tool refinement can improve algorithms without changing the command surface.
 
 ## Environment Gaps
 

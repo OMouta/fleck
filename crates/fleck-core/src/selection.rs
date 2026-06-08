@@ -499,6 +499,7 @@ mod tests {
             mask_layer_id: None,
             group_id: None,
             export_participation: ExportParticipation::Included,
+            raster: None,
         }
     }
 

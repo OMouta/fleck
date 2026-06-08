@@ -158,6 +158,16 @@ impl Workspace {
                     &layer_ids,
                 );
             }
+            if let Some(raster) = &layer.raster {
+                let expected_len = raster.width as usize * raster.height as usize * 4;
+                if raster.pixels.len() != expected_len {
+                    issues.push(ValidationIssue::InvalidRasterPixels {
+                        layer_id: layer.id.clone(),
+                        expected_len,
+                        actual_len: raster.pixels.len(),
+                    });
+                }
+            }
         }
 
         for image in &self.image_objects {
@@ -316,6 +326,15 @@ pub struct Layer {
     pub mask_layer_id: Option<ObjectId>,
     pub group_id: Option<ObjectId>,
     pub export_participation: ExportParticipation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raster: Option<RasterPixels>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RasterPixels {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -756,6 +775,12 @@ pub enum ValidationIssue {
         expected_len: usize,
         actual_len: usize,
     },
+    #[error("layer `{layer_id}` raster has {actual_len} byte(s); expected {expected_len}")]
+    InvalidRasterPixels {
+        layer_id: ObjectId,
+        expected_len: usize,
+        actual_len: usize,
+    },
     #[error("output `{output_id}` must have a filename")]
     EmptyFilename { output_id: ObjectId },
     #[error("output `{output_id}` must have positive dimensions and scale")]
@@ -1038,6 +1063,7 @@ mod tests {
             mask_layer_id: None,
             group_id: None,
             export_participation: ExportParticipation::Included,
+            raster: None,
         }
     }
 

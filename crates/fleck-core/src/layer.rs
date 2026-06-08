@@ -1,6 +1,6 @@
 use crate::model::{
-    BlendMode, ClippingBehavior, ExportParticipation, Layer, ObjectGroup, ObjectId, Point, Rect,
-    Transform, Workspace,
+    BlendMode, ClippingBehavior, ExportParticipation, Layer, ObjectGroup, ObjectId, Point,
+    RasterPixels, Rect, Transform, Workspace,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,6 +50,10 @@ pub fn create_layer(workspace: &mut Workspace, new_layer: NewLayer) -> LayerResu
         mask_layer_id: None,
         group_id: None,
         export_participation: ExportParticipation::Included,
+        raster: Some(transparent_raster(
+            new_layer.bounds.width,
+            new_layer.bounds.height,
+        )),
     });
     Ok(())
 }
@@ -268,8 +272,19 @@ pub fn flatten_visible_layers(
         mask_layer_id: None,
         group_id: None,
         export_participation: ExportParticipation::Included,
+        raster: Some(transparent_raster(bounds.width, bounds.height)),
     });
     Ok(())
+}
+
+fn transparent_raster(width: f32, height: f32) -> RasterPixels {
+    let width = width.ceil().max(1.0) as u32;
+    let height = height.ceil().max(1.0) as u32;
+    RasterPixels {
+        width,
+        height,
+        pixels: vec![0; width as usize * height as usize * 4],
+    }
 }
 
 fn require_layer<'a>(workspace: &'a Workspace, id: &ObjectId) -> LayerResult<&'a Layer> {

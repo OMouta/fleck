@@ -761,6 +761,7 @@ mod tests {
             mask_layer_id: None,
             group_id: None,
             export_participation: ExportParticipation::Included,
+            raster: None,
         });
         workspace.export_areas.push(crate::model::ExportArea {
             id: id("export"),

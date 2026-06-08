@@ -431,7 +431,7 @@ Acceptance criteria:
 
 ### TASK-012: Implement Core Pixel Editing Tools
 
-Status: open
+Status: done
 
 Requirements: REQ-015, REQ-016, REQ-027, REQ-048
 

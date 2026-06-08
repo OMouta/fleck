@@ -7,6 +7,7 @@ use crate::model::{
     Point, Rect, RgbaColor, SelectionKind, TransparencyBehavior, TrimBehavior, ValidationError,
     Workspace,
 };
+use crate::pixel::{self, CloneSample, Gradient, PixelError, Stroke, StrokePoint};
 use crate::selection::{self, NewSelection, SelectionError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -477,6 +478,7 @@ pub fn default_command_registry() -> Result<CommandRegistry, CommandError> {
     register_layer_commands(&mut registry)?;
     register_image_commands(&mut registry)?;
     register_selection_commands(&mut registry)?;
+    register_pixel_commands(&mut registry)?;
     register_export_commands(&mut registry)?;
     Ok(registry)
 }
@@ -512,6 +514,8 @@ pub enum CommandError {
     Export(#[from] ExportError),
     #[error("selection operation failed")]
     Selection(#[from] SelectionError),
+    #[error("pixel operation failed")]
+    Pixel(#[from] PixelError),
     #[error("invalid object id parameter `{key}`")]
     InvalidObjectId {
         key: &'static str,
@@ -1336,6 +1340,264 @@ fn register_selection_commands(registry: &mut CommandRegistry) -> Result<(), Com
     Ok(())
 }
 
+fn register_pixel_commands(registry: &mut CommandRegistry) -> Result<(), CommandError> {
+    register_tool_command(
+        registry,
+        "pixel.move",
+        "Move Pixels",
+        "Move a layer or active selection by a delta.",
+        &["move layer", "nudge pixels"],
+        None,
+        vec![
+            prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("dx", "Delta X", ParameterKind::Number, true),
+            prompt("dy", "Delta Y", ParameterKind::Number, true),
+            prompt(
+                "selection_id",
+                "Selection ID",
+                ParameterKind::ObjectId,
+                false,
+            ),
+        ],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            if let Some(selection_id) = optional_object_id(&invocation.parameters, "selection_id")?
+                .or_else(|| invocation.context.active_selection_id.clone())
+            {
+                selection::move_selection(
+                    workspace,
+                    &selection_id,
+                    required_f32(&invocation.parameters, "dx")?,
+                    required_f32(&invocation.parameters, "dy")?,
+                )?;
+            } else {
+                pixel::move_layer(
+                    workspace,
+                    &required_object_id(&invocation.parameters, "layer_id")?,
+                    required_f32(&invocation.parameters, "dx")?,
+                    required_f32(&invocation.parameters, "dy")?,
+                )?;
+            }
+            Ok(CommandEffect::undoable("Move Pixels"))
+        },
+    )?;
+    register_tool_command(
+        registry,
+        "pixel.crop",
+        "Crop Layer",
+        "Crop raster pixels on a layer.",
+        &["crop image"],
+        None,
+        rect_layer_prompts(),
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            pixel::crop_layer(
+                workspace,
+                &required_object_id(&invocation.parameters, "layer_id")?,
+                rect_from_parameters(&invocation.parameters)?,
+            )?;
+            Ok(CommandEffect::undoable("Crop Layer"))
+        },
+    )?;
+    register_tool_command(
+        registry,
+        "pixel.resize_layer",
+        "Resize Image",
+        "Resize raster pixels on a layer.",
+        &["resize layer"],
+        None,
+        vec![
+            prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("width", "Width", ParameterKind::Number, true),
+            prompt("height", "Height", ParameterKind::Number, true),
+            prompt("scaling", "Scaling", ParameterKind::String, false),
+        ],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            pixel::resize_layer(
+                workspace,
+                &required_object_id(&invocation.parameters, "layer_id")?,
+                required_u32(&invocation.parameters, "width")?,
+                required_u32(&invocation.parameters, "height")?,
+                optional_scaling_mode(&invocation.parameters, "scaling")?
+                    .unwrap_or(workspace.document_settings.default_scaling),
+            )?;
+            Ok(CommandEffect::undoable("Resize Image"))
+        },
+    )?;
+    register_tool_command(
+        registry,
+        "pixel.resize_canvas",
+        "Resize Canvas",
+        "Set workspace canvas origin for canvas resize flows.",
+        &["resize workspace canvas"],
+        None,
+        vec![
+            prompt("origin_x", "Origin X", ParameterKind::Number, true),
+            prompt("origin_y", "Origin Y", ParameterKind::Number, true),
+        ],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            pixel::resize_canvas(
+                workspace,
+                Point {
+                    x: required_f32(&invocation.parameters, "origin_x")?,
+                    y: required_f32(&invocation.parameters, "origin_y")?,
+                },
+            )?;
+            Ok(CommandEffect::undoable("Resize Canvas"))
+        },
+    )?;
+    register_tool_command(
+        registry,
+        "pixel.rotate",
+        "Rotate Layer",
+        "Rotate raster pixels by a right angle.",
+        &["rotate image"],
+        None,
+        vec![
+            prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("degrees", "Degrees", ParameterKind::Number, true),
+        ],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            pixel::rotate_layer(
+                workspace,
+                &required_object_id(&invocation.parameters, "layer_id")?,
+                required_i32(&invocation.parameters, "degrees")?,
+            )?;
+            Ok(CommandEffect::undoable("Rotate Layer"))
+        },
+    )?;
+    register_tool_command(
+        registry,
+        "pixel.flip",
+        "Flip Layer",
+        "Flip raster pixels horizontally or vertically.",
+        &["flip image"],
+        None,
+        vec![
+            prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("horizontal", "Horizontal", ParameterKind::Boolean, true),
+        ],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            pixel::flip_layer(
+                workspace,
+                &required_object_id(&invocation.parameters, "layer_id")?,
+                invocation.parameters.required_bool("horizontal")?,
+            )?;
+            Ok(CommandEffect::undoable("Flip Layer"))
+        },
+    )?;
+    for (id, label, operation) in [
+        ("pixel.brush", "Brush Stroke", PixelStrokeOperation::Brush),
+        (
+            "pixel.pencil",
+            "Pencil Stroke",
+            PixelStrokeOperation::Pencil,
+        ),
+        ("pixel.eraser", "Erase Pixels", PixelStrokeOperation::Eraser),
+        (
+            "pixel.smudge",
+            "Smudge Pixels",
+            PixelStrokeOperation::Smudge,
+        ),
+    ] {
+        register_stroke_tool_command(registry, id, label, operation)?;
+    }
+    register_tool_command(
+        registry,
+        "pixel.fill",
+        "Fill Bucket",
+        "Flood-fill contiguous pixels.",
+        &["bucket fill"],
+        None,
+        color_point_prompts(),
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            pixel::fill(
+                workspace,
+                &required_object_id(&invocation.parameters, "layer_id")?,
+                point_from_xy(&invocation.parameters, "x", "y")?,
+                color_from_parameters(&invocation.parameters)?,
+                command_selection_id(invocation)?,
+            )?;
+            Ok(CommandEffect::undoable("Fill Bucket"))
+        },
+    )?;
+    register_tool_command(
+        registry,
+        "pixel.gradient",
+        "Gradient Fill",
+        "Fill pixels with a linear gradient.",
+        &["linear gradient"],
+        None,
+        vec![
+            prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("start_x", "Start X", ParameterKind::Number, true),
+            prompt("start_y", "Start Y", ParameterKind::Number, true),
+            prompt("end_x", "End X", ParameterKind::Number, true),
+            prompt("end_y", "End Y", ParameterKind::Number, true),
+        ],
+        true,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            pixel::gradient(
+                workspace,
+                &required_object_id(&invocation.parameters, "layer_id")?,
+                Gradient {
+                    start: point_from_xy(&invocation.parameters, "start_x", "start_y")?,
+                    end: point_from_xy(&invocation.parameters, "end_x", "end_y")?,
+                    start_color: color_from_prefixed_parameters(&invocation.parameters, "start")?,
+                    end_color: color_from_prefixed_parameters(&invocation.parameters, "end")?,
+                    selection_id: command_selection_id(invocation)?,
+                },
+            )?;
+            Ok(CommandEffect::undoable("Gradient Fill"))
+        },
+    )?;
+    register_tool_command(
+        registry,
+        "pixel.color_picker",
+        "Color Picker",
+        "Sample a layer pixel color.",
+        &["pick color", "eyedropper"],
+        None,
+        vec![
+            prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("x", "X", ParameterKind::Number, true),
+            prompt("y", "Y", ParameterKind::Number, true),
+        ],
+        false,
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            pixel::color_picker(
+                workspace,
+                &required_object_id(&invocation.parameters, "layer_id")?,
+                point_from_xy(&invocation.parameters, "x", "y")?,
+            )?;
+            Ok(CommandEffect::undoable("Pick Color"))
+        },
+    )?;
+    for (id, label, opacity) in [
+        ("pixel.clone", "Clone Pixels", 1.0),
+        ("pixel.heal", "Heal Pixels", 0.5),
+    ] {
+        register_clone_tool_command(registry, id, label, opacity)?;
+    }
+    register_filter_tool_command(registry, "pixel.blur", "Blur Pixels", pixel::blur)?;
+    register_filter_tool_command(registry, "pixel.sharpen", "Sharpen Pixels", pixel::sharpen)?;
+    Ok(())
+}
+
 fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), CommandError> {
     register_export_command(
         registry,
@@ -1816,6 +2078,165 @@ fn register_selection_command(
     )
 }
 
+fn register_tool_command(
+    registry: &mut CommandRegistry,
+    id: &str,
+    label: &str,
+    description: &str,
+    aliases: &[&str],
+    shortcut: Option<&str>,
+    parameter_prompts: Vec<ParameterPrompt>,
+    undoable: bool,
+    handler: impl Fn(&mut Workspace, &CommandInvocation, &CommandRuntime) -> CommandResult
+        + Send
+        + Sync
+        + 'static,
+) -> Result<(), CommandError> {
+    registry.register(
+        CommandDefinition {
+            id: CommandId::new(id)?,
+            label: label.to_owned(),
+            description: description.to_owned(),
+            group: CommandGroup::Tool,
+            aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
+            shortcut: shortcut.map(str::to_owned),
+            undoable,
+            parameter_prompts,
+        },
+        handler,
+    )
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PixelStrokeOperation {
+    Brush,
+    Pencil,
+    Eraser,
+    Smudge,
+}
+
+fn register_stroke_tool_command(
+    registry: &mut CommandRegistry,
+    id: &str,
+    label: &str,
+    operation: PixelStrokeOperation,
+) -> Result<(), CommandError> {
+    let operation_label = label.to_owned();
+    register_tool_command(
+        registry,
+        id,
+        label,
+        "Apply a pointer stroke to raster pixels.",
+        &[],
+        None,
+        stroke_prompts(),
+        true,
+        move |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let layer_id = required_object_id(&invocation.parameters, "layer_id")?;
+            let stroke = stroke_from_parameters(invocation)?;
+            match operation {
+                PixelStrokeOperation::Brush => pixel::brush(workspace, &layer_id, stroke)?,
+                PixelStrokeOperation::Pencil => pixel::pencil(workspace, &layer_id, stroke)?,
+                PixelStrokeOperation::Eraser => pixel::eraser(workspace, &layer_id, stroke)?,
+                PixelStrokeOperation::Smudge => pixel::smudge(workspace, &layer_id, stroke)?,
+            }
+            Ok(CommandEffect::undoable(operation_label.clone()))
+        },
+    )
+}
+
+fn register_clone_tool_command(
+    registry: &mut CommandRegistry,
+    id: &str,
+    label: &str,
+    opacity: f32,
+) -> Result<(), CommandError> {
+    let operation_label = label.to_owned();
+    register_tool_command(
+        registry,
+        id,
+        label,
+        "Copy sampled pixels onto a target point.",
+        &[],
+        None,
+        vec![
+            prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt("source_x", "Source X", ParameterKind::Number, true),
+            prompt("source_y", "Source Y", ParameterKind::Number, true),
+            prompt("target_x", "Target X", ParameterKind::Number, true),
+            prompt("target_y", "Target Y", ParameterKind::Number, true),
+            prompt("radius", "Radius", ParameterKind::Number, false),
+            prompt(
+                "selection_id",
+                "Selection ID",
+                ParameterKind::ObjectId,
+                false,
+            ),
+        ],
+        true,
+        move |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let sample = CloneSample {
+                source: point_from_xy(&invocation.parameters, "source_x", "source_y")?,
+                target: point_from_xy(&invocation.parameters, "target_x", "target_y")?,
+                radius: invocation.parameters.optional_f32("radius", 4.0)?,
+                selection_id: command_selection_id(invocation)?,
+            };
+            if opacity >= 1.0 {
+                pixel::clone_pixels(
+                    workspace,
+                    &required_object_id(&invocation.parameters, "layer_id")?,
+                    sample,
+                )?;
+            } else {
+                pixel::heal(
+                    workspace,
+                    &required_object_id(&invocation.parameters, "layer_id")?,
+                    sample,
+                )?;
+            }
+            Ok(CommandEffect::undoable(operation_label.clone()))
+        },
+    )
+}
+
+fn register_filter_tool_command(
+    registry: &mut CommandRegistry,
+    id: &str,
+    label: &str,
+    operation: fn(&mut Workspace, &ObjectId, Option<ObjectId>) -> pixel::PixelResult<()>,
+) -> Result<(), CommandError> {
+    let operation_label = label.to_owned();
+    register_tool_command(
+        registry,
+        id,
+        label,
+        "Apply a simple raster filter.",
+        &[],
+        None,
+        vec![
+            prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
+            prompt(
+                "selection_id",
+                "Selection ID",
+                ParameterKind::ObjectId,
+                false,
+            ),
+        ],
+        true,
+        move |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            operation(
+                workspace,
+                &required_object_id(&invocation.parameters, "layer_id")?,
+                command_selection_id(invocation)?,
+            )?;
+            Ok(CommandEffect::undoable(operation_label.clone()))
+        },
+    )
+}
+
 fn register_image_command(
     registry: &mut CommandRegistry,
     id: &str,
@@ -2025,6 +2446,119 @@ fn json_number_field(
     }
 }
 
+fn rect_layer_prompts() -> Vec<ParameterPrompt> {
+    vec![
+        prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
+        prompt("x", "X", ParameterKind::Number, true),
+        prompt("y", "Y", ParameterKind::Number, true),
+        prompt("width", "Width", ParameterKind::Number, true),
+        prompt("height", "Height", ParameterKind::Number, true),
+    ]
+}
+
+fn color_point_prompts() -> Vec<ParameterPrompt> {
+    vec![
+        prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
+        prompt("x", "X", ParameterKind::Number, true),
+        prompt("y", "Y", ParameterKind::Number, true),
+        prompt("r", "Red", ParameterKind::Number, true),
+        prompt("g", "Green", ParameterKind::Number, true),
+        prompt("b", "Blue", ParameterKind::Number, true),
+        prompt("a", "Alpha", ParameterKind::Number, false),
+        prompt(
+            "selection_id",
+            "Selection ID",
+            ParameterKind::ObjectId,
+            false,
+        ),
+    ]
+}
+
+fn stroke_prompts() -> Vec<ParameterPrompt> {
+    vec![
+        prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
+        prompt("points", "Points", ParameterKind::String, true),
+        prompt("radius", "Radius", ParameterKind::Number, false),
+        prompt("opacity", "Opacity", ParameterKind::Number, false),
+        prompt("r", "Red", ParameterKind::Number, false),
+        prompt("g", "Green", ParameterKind::Number, false),
+        prompt("b", "Blue", ParameterKind::Number, false),
+        prompt("a", "Alpha", ParameterKind::Number, false),
+        prompt(
+            "selection_id",
+            "Selection ID",
+            ParameterKind::ObjectId,
+            false,
+        ),
+    ]
+}
+
+fn rect_from_parameters(parameters: &CommandParameters) -> Result<Rect, CommandError> {
+    Ok(Rect {
+        x: required_f32(parameters, "x")?,
+        y: required_f32(parameters, "y")?,
+        width: required_f32(parameters, "width")?,
+        height: required_f32(parameters, "height")?,
+    })
+}
+
+fn point_from_xy(
+    parameters: &CommandParameters,
+    x_key: &'static str,
+    y_key: &'static str,
+) -> Result<Point, CommandError> {
+    Ok(Point {
+        x: required_f32(parameters, x_key)?,
+        y: required_f32(parameters, y_key)?,
+    })
+}
+
+fn stroke_from_parameters(invocation: &CommandInvocation) -> Result<Stroke, CommandError> {
+    Ok(Stroke {
+        points: points_parameter(&invocation.parameters, "points")?
+            .into_iter()
+            .map(|point| StrokePoint {
+                x: point.x,
+                y: point.y,
+            })
+            .collect(),
+        color: color_from_parameters(&invocation.parameters)?,
+        radius: invocation.parameters.optional_f32("radius", 4.0)?,
+        opacity: invocation.parameters.optional_f32("opacity", 1.0)?,
+        selection_id: command_selection_id(invocation)?,
+    })
+}
+
+fn command_selection_id(invocation: &CommandInvocation) -> Result<Option<ObjectId>, CommandError> {
+    Ok(optional_object_id(&invocation.parameters, "selection_id")?
+        .or_else(|| invocation.context.active_selection_id.clone()))
+}
+
+fn color_from_parameters(parameters: &CommandParameters) -> Result<RgbaColor, CommandError> {
+    Ok(RgbaColor {
+        r: optional_u8(parameters, "r")?.unwrap_or(0),
+        g: optional_u8(parameters, "g")?.unwrap_or(0),
+        b: optional_u8(parameters, "b")?.unwrap_or(0),
+        a: optional_u8(parameters, "a")?.unwrap_or(255),
+    })
+}
+
+fn color_from_prefixed_parameters(
+    parameters: &CommandParameters,
+    prefix: &'static str,
+) -> Result<RgbaColor, CommandError> {
+    let r = format!("{prefix}_r");
+    let g = format!("{prefix}_g");
+    let b = format!("{prefix}_b");
+    let a = format!("{prefix}_a");
+    Ok(RgbaColor {
+        r: optional_u8_dynamic(parameters, &r)?.unwrap_or(0),
+        g: optional_u8_dynamic(parameters, &g)?.unwrap_or(0),
+        b: optional_u8_dynamic(parameters, &b)?.unwrap_or(0),
+        a: optional_u8_dynamic(parameters, &a)?.unwrap_or(255),
+    })
+}
+
 fn output_prompts(require_fields: bool) -> Vec<ParameterPrompt> {
     vec![
         prompt("id", "Output ID", ParameterKind::ObjectId, true),
@@ -2210,6 +2744,34 @@ fn optional_u32(
     }
 }
 
+fn required_u32(parameters: &CommandParameters, key: &'static str) -> Result<u32, CommandError> {
+    match parameters.get(key) {
+        Some(JsonValue::Number(value))
+            if value.is_finite() && *value > 0.0 && value.fract() == 0.0 =>
+        {
+            Ok(*value as u32)
+        }
+        Some(_) => Err(CommandError::InvalidParameter {
+            key,
+            expected: "positive integer",
+        }),
+        None => Err(CommandError::MissingParameter { key }),
+    }
+}
+
+fn required_i32(parameters: &CommandParameters, key: &'static str) -> Result<i32, CommandError> {
+    match parameters.get(key) {
+        Some(JsonValue::Number(value)) if value.is_finite() && value.fract() == 0.0 => {
+            Ok(*value as i32)
+        }
+        Some(_) => Err(CommandError::InvalidParameter {
+            key,
+            expected: "integer",
+        }),
+        None => Err(CommandError::MissingParameter { key }),
+    }
+}
+
 fn optional_nullable_u32(
     parameters: &CommandParameters,
     key: &'static str,
@@ -2232,6 +2794,22 @@ fn optional_u8(
             expected: "0..=255 integer or null",
         }),
         None => Ok(None),
+    }
+}
+
+fn optional_u8_dynamic(
+    parameters: &CommandParameters,
+    key: &str,
+) -> Result<Option<u8>, CommandError> {
+    match parameters.get(key) {
+        Some(JsonValue::Number(value)) if value.is_finite() => {
+            Ok(Some(value.round().clamp(0.0, 255.0) as u8))
+        }
+        Some(JsonValue::Null) | None => Ok(None),
+        Some(_) => Err(CommandError::InvalidParameter {
+            key: "color",
+            expected: "0..=255 number or null",
+        }),
     }
 }
 
@@ -2306,6 +2884,29 @@ fn optional_output_format(
         .optional_string(key)?
         .map(parse_output_format)
         .transpose()
+}
+
+fn optional_scaling_mode(
+    parameters: &CommandParameters,
+    key: &'static str,
+) -> Result<Option<crate::model::ScalingMode>, CommandError> {
+    parameters
+        .optional_string(key)?
+        .map(parse_scaling_mode)
+        .transpose()
+}
+
+fn parse_scaling_mode(value: &str) -> Result<crate::model::ScalingMode, CommandError> {
+    match value {
+        "nearest" | "nearest_neighbor" => Ok(crate::model::ScalingMode::NearestNeighbor),
+        "bilinear" => Ok(crate::model::ScalingMode::Bilinear),
+        "bicubic" => Ok(crate::model::ScalingMode::Bicubic),
+        "lanczos" => Ok(crate::model::ScalingMode::Lanczos),
+        _ => Err(CommandError::InvalidParameter {
+            key: "scaling",
+            expected: "nearest_neighbor, bilinear, bicubic, or lanczos",
+        }),
+    }
 }
 
 fn parse_output_format(value: &str) -> Result<OutputFormat, CommandError> {
@@ -2475,6 +3076,11 @@ mod tests {
             definition.id.as_str() == "selection.direct_export"
                 && definition.group == CommandGroup::Selection
                 && !definition.undoable
+        }));
+        assert!(definitions.iter().any(|definition| {
+            definition.id.as_str() == "pixel.brush"
+                && definition.group == CommandGroup::Tool
+                && definition.undoable
         }));
     }
 
@@ -2981,6 +3587,68 @@ mod tests {
             .alpha
             .iter()
             .all(|alpha| *alpha == 255));
+    }
+
+    #[test]
+    fn pixel_tool_commands_are_undoable() {
+        let registry = default_command_registry().expect("registry");
+        let mut engine = CommandEngine::new();
+        let mut workspace = Workspace::empty(id("workspace"));
+
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "layer.create",
+                    vec![
+                        ("id", JsonValue::String("layer".to_owned())),
+                        ("name", JsonValue::String("Layer".to_owned())),
+                        ("width", JsonValue::Number(4.0)),
+                        ("height", JsonValue::Number(4.0)),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("create layer");
+        engine
+            .execute(
+                &mut workspace,
+                &registry,
+                invocation(
+                    "pixel.brush",
+                    vec![
+                        ("layer_id", JsonValue::String("layer".to_owned())),
+                        (
+                            "points",
+                            JsonValue::Array(vec![JsonValue::Object(BTreeMap::from([
+                                ("x".to_owned(), JsonValue::Number(1.0)),
+                                ("y".to_owned(), JsonValue::Number(1.0)),
+                            ]))]),
+                        ),
+                        ("radius", JsonValue::Number(1.0)),
+                        ("r", JsonValue::Number(255.0)),
+                        ("g", JsonValue::Number(0.0)),
+                        ("b", JsonValue::Number(0.0)),
+                        ("a", JsonValue::Number(255.0)),
+                    ],
+                ),
+                &CommandRuntime::default(),
+            )
+            .expect("brush");
+
+        let painted_alpha = workspace.layers[0].raster.as_ref().expect("raster").pixels
+            [((1 * 4 + 1) * 4 + 3) as usize];
+        assert_eq!(painted_alpha, 255);
+
+        engine.undo(&mut workspace).expect("undo brush");
+        assert!(workspace.layers[0]
+            .raster
+            .as_ref()
+            .expect("raster")
+            .pixels
+            .iter()
+            .all(|byte| *byte == 0));
     }
 
     fn rename_invocation(name: &str) -> CommandInvocation {

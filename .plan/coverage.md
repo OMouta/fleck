@@ -304,9 +304,36 @@ Evidence:
 
 Coverage impact:
 - REQ-008: selection types, expansion/contraction, feathering, inversion, movement, deletion of active selection state, copy metadata, layer creation, export area creation, and direct-export command hooks are implemented. True selected-pixel deletion/copy/move awaits pixel-buffer editing per DEC-011-selection-pixel-buffer, so REQ-008 stays partial.
-- REQ-016: selection movement hooks exist, but destructive pixel movement remains partial until TASK-012 provides editable raster pixels.
+- REQ-016: selection movement hooks exist. TASK-012 added editable raster pixels and selection-masked writes; selection extraction/duplication/paste remains partial.
 - REQ-028 and REQ-029: selection bounds can create export areas and feed direct selection export hooks; full batch/export UI behavior remains with later export/frontend tasks.
 
 Known gaps:
 - Magic wand and color range currently build masks from provided bounds/tolerance metadata because layer pixel sampling is not available yet.
 - Copy/direct export commands validate and expose selection mask/bounds metadata, but encoded clipboard/export payload generation remains in rendering/platform integration.
+
+### TASK-012
+
+Status: done
+
+Evidence:
+- Added optional `RasterPixels` storage to `Layer` in `crates/fleck-core/src/model.rs`, with validation for byte length and backward-compatible serialization.
+- Updated layer creation/flattening in `crates/fleck-core/src/layer.rs` to initialize transparent RGBA raster buffers.
+- Added `crates/fleck-core/src/pixel.rs` with core pixel editing backends for move, crop, resize layer, resize canvas origin, rotate, flip, brush, pencil, eraser, fill bucket, gradient, color picker, clone, healing, blur, sharpen, and smudge.
+- Pixel writes are gated by `SelectionMask`/selection bounds where a selection is supplied, so tools modify only the intended selection region.
+- Registered undoable `pixel.*` tool commands in `crates/fleck-core/src/command.rs`; color picker is registered as non-undoable.
+- Updated `crates/fleck-render/src/lib.rs` so layers with raster buffers render/export actual pixels, while older metadata-only layers still use the deterministic preview fallback.
+- Added tests for raster brush/eraser behavior, selection-limited fill, crop/resize/rotate/flip shape updates, command registration, and command undo.
+- Verified `cargo fmt --all`.
+- Verified `cargo test -p fleck-core`.
+- Verified `cargo test --workspace`.
+
+Coverage impact:
+- REQ-015: core backends exist for the listed raster tools except text/shape/line/arrow/rounded-rectangle, which are planned separately under TASK-013 and TASK-FE-011.
+- REQ-016: selected-region pixel writes, erasing, movement hooks, layer movement, and layer transforms are implemented. Selection extraction/duplication/paste-into-selection remain partial refinement.
+- REQ-027: alpha editing works through RGBA raster pixels and eraser/fill/gradient/brush alpha behavior.
+- REQ-048: operations are synchronous but deterministic and undoable; benchmarked responsiveness and background scheduling remain with TASK-023.
+
+Known gaps:
+- Healing, blur, sharpen, and smudge use simple local algorithms suitable for an MVP backend, not production-grade image processing.
+- `pixel.resize_canvas` updates workspace canvas origin because the current infinite-canvas model has no finite canvas dimensions.
+- Brush stroke batching/performance budgets are not yet defined.
