@@ -165,6 +165,17 @@ function buildRenderModel(): RenderModel {
     layers: [
       { id: "rl-base", rect: { x: 0, y: 0, width, height }, color: "#2b3b55", opacity: 1, visible: true },
       { id: "rl-art", rect: inset, color: "#3a86ff", opacity: 0.9, visible: true },
+      ...mockDoc.imageObjects.map((object, index) => {
+        const asset = mockDoc.assets.find((a) => a.id === object.sourceAssetId);
+        return {
+          id: object.id,
+          rect: { x: object.position.x, y: object.position.y, width: object.scale.width, height: object.scale.height },
+          color: ["#3a86ff", "#f97316", "#22c55e", "#e879f9"][index % 4],
+          opacity: object.opacity / 100,
+          visible: true,
+          imageSrc: asset?.source === "linked" ? asset.path : null,
+        };
+      }),
     ],
     // Export areas are document metadata, so the canvas draws exactly what the
     // exports panel lists — keeping selection/highlight in sync across both.
@@ -466,6 +477,8 @@ const EXPORT_OP_LABELS: Record<string, string> = {
   "export_area.rename": "Rename Export Area",
   "export_area.move": "Move Export Area",
   "export_area.resize": "Resize Export Area",
+  "export_area.set_padding": "Set Export Area Padding",
+  "export_area.set_background": "Set Export Area Background",
   "export_area.duplicate": "Duplicate Export Area",
   "export_area.delete": "Delete Export Area",
   "export_area.set_tags": "Set Export Area Tags",
@@ -653,9 +666,12 @@ function projectExportArea(area: MockExportArea): ExportArea {
   return {
     id: area.id,
     name: area.name,
+    bounds: { ...area.bounds },
     dimensions: `${round(area.bounds.width)} × ${round(area.bounds.height)} px`,
     position: `${round(area.bounds.x)}, ${round(area.bounds.y)}`,
+    paddingPx: { ...area.padding },
     padding: paddingLabel(area.padding),
+    backgroundParam: area.background,
     background: backgroundLabel(area.background),
     format: outputs[0] ? formatLabel(outputs[0].format) : "—",
     status: warnings.length > 0 ? "warning" : "ready",
@@ -718,6 +734,23 @@ function applyExportMutation(commandId: string, p: Record<string, unknown>): boo
       if (!area || width <= 0 || height <= 0) return false;
       area.bounds.width = width;
       area.bounds.height = height;
+      return true;
+    }
+    case "export_area.set_padding": {
+      const area = findArea(p.id);
+      if (!area) return false;
+      area.padding = {
+        top: Math.max(0, num(p.top, area.padding.top)),
+        right: Math.max(0, num(p.right, area.padding.right)),
+        bottom: Math.max(0, num(p.bottom, area.padding.bottom)),
+        left: Math.max(0, num(p.left, area.padding.left)),
+      };
+      return true;
+    }
+    case "export_area.set_background": {
+      const area = findArea(p.id);
+      if (!area) return false;
+      area.background = backgroundParam(p.background);
       return true;
     }
     case "export_area.duplicate": {

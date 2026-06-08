@@ -1083,6 +1083,56 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
     )?;
     register_export_command(
         registry,
+        "export_area.set_padding",
+        "Set Export Area Padding",
+        "Set export area padding.",
+        &["pad export area"],
+        None,
+        vec![
+            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("top", "Top", ParameterKind::Number, true),
+            prompt("right", "Right", ParameterKind::Number, true),
+            prompt("bottom", "Bottom", ParameterKind::Number, true),
+            prompt("left", "Left", ParameterKind::Number, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            export::set_export_area_padding(
+                workspace,
+                &id,
+                Padding {
+                    top: required_f32(&invocation.parameters, "top")?.max(0.0),
+                    right: required_f32(&invocation.parameters, "right")?.max(0.0),
+                    bottom: required_f32(&invocation.parameters, "bottom")?.max(0.0),
+                    left: required_f32(&invocation.parameters, "left")?.max(0.0),
+                },
+            )?;
+            Ok(CommandEffect::undoable("Set Export Area Padding"))
+        },
+    )?;
+    register_export_command(
+        registry,
+        "export_area.set_background",
+        "Set Export Area Background",
+        "Set export area background.",
+        &["export area background"],
+        None,
+        vec![
+            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("background", "Background", ParameterKind::String, true),
+        ],
+        |workspace, invocation, runtime| {
+            runtime.ensure_not_cancelled()?;
+            let id = required_object_id(&invocation.parameters, "id")?;
+            let background =
+                parse_export_background(invocation.parameters.required_string("background")?)?;
+            export::set_export_area_background(workspace, &id, background)?;
+            Ok(CommandEffect::undoable("Set Export Area Background"))
+        },
+    )?;
+    register_export_command(
+        registry,
         "export_area.duplicate",
         "Duplicate Export Area",
         "Duplicate an export area.",

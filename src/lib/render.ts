@@ -8,6 +8,7 @@
  */
 import type { OverlaySettings, Rect, RenderModel, Viewport } from "./fleck-data";
 import { integerLines, visibleWorkspaceRect, workspaceToScreen } from "./viewport";
+import { isTauri } from "./window";
 
 export type Palette = {
   gridDot: string;
@@ -35,9 +36,63 @@ type PaintArgs = {
   dpr: number;
   /** Export area to emphasize (kept in sync with the exports panel selection). */
   selectedExportAreaId?: string | null;
+  onAssetsChanged?: () => void;
 };
 
-export function paintScene({ ctx, model, vp, overlays, palette, dpr, selectedExportAreaId }: PaintArgs) {
+type ImageCacheEntry = {
+  image: HTMLImageElement;
+  ready: boolean;
+  failed: boolean;
+};
+
+const imageCache = new Map<string, ImageCacheEntry>();
+const convertedSources = new Map<string, Promise<string>>();
+
+function loadImage(src: string, onAssetsChanged?: () => void): ImageCacheEntry | null {
+  if (!src || typeof Image === "undefined") return null;
+  const cached = imageCache.get(src);
+  if (cached) return cached;
+
+  const entry: ImageCacheEntry = { image: new Image(), ready: false, failed: false };
+  imageCache.set(src, entry);
+  entry.image.onload = () => {
+    entry.ready = true;
+    onAssetsChanged?.();
+  };
+  entry.image.onerror = () => {
+    entry.failed = true;
+    onAssetsChanged?.();
+  };
+  resolveImageSrc(src)
+    .then((resolved) => {
+      entry.image.src = resolved;
+    })
+    .catch(() => {
+      entry.failed = true;
+      onAssetsChanged?.();
+    });
+  return entry;
+}
+
+function resolveImageSrc(src: string): Promise<string> {
+  const cached = convertedSources.get(src);
+  if (cached) return cached;
+  const pending = (async () => {
+    if (isTauri() && isLikelyFilePath(src)) {
+      const { convertFileSrc } = await import("@tauri-apps/api/core");
+      return convertFileSrc(src);
+    }
+    return src;
+  })();
+  convertedSources.set(src, pending);
+  return pending;
+}
+
+function isLikelyFilePath(src: string): boolean {
+  return src.startsWith("/") || /^[A-Za-z]:[\\/]/.test(src);
+}
+
+export function paintScene({ ctx, model, vp, overlays, palette, dpr, selectedExportAreaId, onAssetsChanged }: PaintArgs) {
   const { width, height } = vp.screen;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
@@ -52,8 +107,13 @@ export function paintScene({ ctx, model, vp, overlays, palette, dpr, selectedExp
       if (!layer.visible) continue;
       const r = toScreenRect(vp, layer.rect);
       ctx.globalAlpha = layer.opacity;
-      ctx.fillStyle = layer.color;
-      ctx.fillRect(r.x, r.y, r.width, r.height);
+      const image = layer.imageSrc ? loadImage(layer.imageSrc, onAssetsChanged) : null;
+      if (image?.ready) {
+        ctx.drawImage(image.image, r.x, r.y, r.width, r.height);
+      } else {
+        ctx.fillStyle = layer.color;
+        ctx.fillRect(r.x, r.y, r.width, r.height);
+      }
     }
     ctx.globalAlpha = 1;
 

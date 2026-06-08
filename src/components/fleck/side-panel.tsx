@@ -42,6 +42,7 @@ import { useExportAreas, useHistory, useHistoryJumpSupported, useImageObjects, u
 import { BLEND_MODES } from "@/lib/layer-commands";
 import { SOURCE_STATE_LABEL } from "@/lib/image-commands";
 import {
+  EXPORT_BACKGROUNDS,
   newExportId,
   OUTPUT_FORMATS,
   SCALE_PRESETS,
@@ -1103,6 +1104,12 @@ function ExportsPanel() {
           onAreaAction={(a) => handleAreaAction(a, selectedArea)}
           onOutputAction={(a, output) => handleOutputAction(a, selectedArea, output)}
           onCommitRename={(name) => commitRename(selectedArea, name)}
+          onMoveArea={(x, y) => execute("export_area.move", { id: selectedArea.id, x, y })}
+          onResizeArea={(width, height) => execute("export_area.resize", { id: selectedArea.id, width, height })}
+          onSetAreaPadding={(padding) => execute("export_area.set_padding", { id: selectedArea.id, ...padding })}
+          onSetAreaBackground={(background) =>
+            execute("export_area.set_background", { id: selectedArea.id, background })
+          }
           onSetOutputFormat={(output, format) => execute("output.update", { id: output.id, format })}
           onSetOutputScale={(output, scale) => execute("output.update", { id: output.id, scale })}
           onSetOutputQuality={(output, quality) => execute("output.update", { id: output.id, quality })}
@@ -1218,6 +1225,10 @@ function ExportInspector({
   onAreaAction,
   onOutputAction,
   onCommitRename,
+  onMoveArea,
+  onResizeArea,
+  onSetAreaPadding,
+  onSetAreaBackground,
   onSetOutputFormat,
   onSetOutputScale,
   onSetOutputQuality,
@@ -1226,6 +1237,10 @@ function ExportInspector({
   onAreaAction: (action: ExportAreaAction) => void;
   onOutputAction: (action: OutputAction, output: Output) => void;
   onCommitRename: (name: string) => void;
+  onMoveArea: (x: number, y: number) => void;
+  onResizeArea: (width: number, height: number) => void;
+  onSetAreaPadding: (padding: ExportArea["paddingPx"]) => void;
+  onSetAreaBackground: (background: string) => void;
   onSetOutputFormat: (output: Output, format: string) => void;
   onSetOutputScale: (output: Output, scale: number) => void;
   onSetOutputQuality: (output: Output, quality: number) => void;
@@ -1252,16 +1267,29 @@ function ExportInspector({
           />
         </Field>
         <Field label="Size">
-          <Readonly>{area.dimensions}</Readonly>
+          <NumericPair
+            x={area.bounds.width}
+            y={area.bounds.height}
+            xLabel="Width"
+            yLabel="Height"
+            min={1}
+            onCommit={(width, height) => onResizeArea(width, height)}
+          />
         </Field>
         <Field label="Position">
-          <Readonly>{area.position}</Readonly>
+          <NumericPair
+            x={area.bounds.x}
+            y={area.bounds.y}
+            xLabel="X"
+            yLabel="Y"
+            onCommit={(x, y) => onMoveArea(x, y)}
+          />
         </Field>
         <Field label="Padding">
-          <Readonly>{area.padding}</Readonly>
+          <PaddingControl padding={area.paddingPx} onCommit={onSetAreaPadding} />
         </Field>
         <Field label="Background">
-          <Readonly>{area.background}</Readonly>
+          <BackgroundMenu value={area.backgroundParam} onSelect={onSetAreaBackground} />
         </Field>
       </div>
 
@@ -1329,6 +1357,174 @@ function ExportInspector({
       </div>
     </div>
   );
+}
+
+function NumericPair({
+  x,
+  y,
+  xLabel,
+  yLabel,
+  min,
+  onCommit,
+}: {
+  x: number;
+  y: number;
+  xLabel: string;
+  yLabel: string;
+  min?: number;
+  onCommit: (x: number, y: number) => void;
+}) {
+  const [draftX, setDraftX] = useState(String(round(x)));
+  const [draftY, setDraftY] = useState(String(round(y)));
+
+  useEffect(() => {
+    setDraftX(String(round(x)));
+    setDraftY(String(round(y)));
+  }, [x, y]);
+
+  const commit = () => {
+    const nextX = clampNumeric(draftX, x, min);
+    const nextY = clampNumeric(draftY, y, min);
+    if (nextX !== round(x) || nextY !== round(y)) onCommit(nextX, nextY);
+    setDraftX(String(nextX));
+    setDraftY(String(nextY));
+  };
+
+  return (
+    <div className="grid grid-cols-2 gap-1.5">
+      <InspectorNumber value={draftX} label={xLabel} min={min} onChange={setDraftX} onCommit={commit} />
+      <InspectorNumber value={draftY} label={yLabel} min={min} onChange={setDraftY} onCommit={commit} />
+    </div>
+  );
+}
+
+function PaddingControl({
+  padding,
+  onCommit,
+}: {
+  padding: ExportArea["paddingPx"];
+  onCommit: (padding: ExportArea["paddingPx"]) => void;
+}) {
+  const [draft, setDraft] = useState({
+    top: String(round(padding.top)),
+    right: String(round(padding.right)),
+    bottom: String(round(padding.bottom)),
+    left: String(round(padding.left)),
+  });
+
+  useEffect(() => {
+    setDraft({
+      top: String(round(padding.top)),
+      right: String(round(padding.right)),
+      bottom: String(round(padding.bottom)),
+      left: String(round(padding.left)),
+    });
+  }, [padding.top, padding.right, padding.bottom, padding.left]);
+
+  const commit = () => {
+    const next = {
+      top: clampNumeric(draft.top, padding.top, 0),
+      right: clampNumeric(draft.right, padding.right, 0),
+      bottom: clampNumeric(draft.bottom, padding.bottom, 0),
+      left: clampNumeric(draft.left, padding.left, 0),
+    };
+    if (
+      next.top !== round(padding.top) ||
+      next.right !== round(padding.right) ||
+      next.bottom !== round(padding.bottom) ||
+      next.left !== round(padding.left)
+    ) {
+      onCommit(next);
+    }
+    setDraft({
+      top: String(next.top),
+      right: String(next.right),
+      bottom: String(next.bottom),
+      left: String(next.left),
+    });
+  };
+
+  return (
+    <div className="grid grid-cols-4 gap-1">
+      {(["top", "right", "bottom", "left"] as const).map((side) => (
+        <InspectorNumber
+          key={side}
+          value={draft[side]}
+          label={side.slice(0, 1).toUpperCase()}
+          min={0}
+          onChange={(value) => setDraft((prev) => ({ ...prev, [side]: value }))}
+          onCommit={commit}
+        />
+      ))}
+    </div>
+  );
+}
+
+function InspectorNumber({
+  value,
+  label,
+  min,
+  onChange,
+  onCommit,
+}: {
+  value: string;
+  label: string;
+  min?: number;
+  onChange: (value: string) => void;
+  onCommit: () => void;
+}) {
+  return (
+    <label className="flex h-7 items-center gap-1 rounded border border-border bg-background px-1 text-[11px] text-muted-foreground focus-within:ring-2 focus-within:ring-ring">
+      <span className="shrink-0">{label}</span>
+      <input
+        type="number"
+        min={min}
+        value={value}
+        aria-label={label}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onCommit}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") {
+            e.preventDefault();
+            onCommit();
+          }
+        }}
+        className="min-w-0 flex-1 bg-transparent text-right font-mono text-[11px] text-foreground outline-none"
+      />
+    </label>
+  );
+}
+
+function BackgroundMenu({ value, onSelect }: { value: string; onSelect: (value: string) => void }) {
+  const current = EXPORT_BACKGROUNDS.find((b) => b.value === value) ?? EXPORT_BACKGROUNDS[0];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className="flex h-7 w-full items-center justify-between gap-1 rounded border border-border bg-background px-1.5 text-[11px] text-foreground transition-colors hover:bg-secondary"
+          aria-label="Export area background"
+        >
+          {current.label}
+          <ChevronDown className="size-3 text-muted-foreground" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-40">
+        {EXPORT_BACKGROUNDS.map((background) => (
+          <DropdownMenuItem key={background.value} onSelect={() => onSelect(background.value)}>
+            {background.label}
+            {background.value === value && <Check className="ml-auto size-3.5 text-primary" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function clampNumeric(value: string, fallback: number, min?: number): number {
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed)) return round(fallback);
+  return min == null ? parsed : Math.max(min, parsed);
 }
 
 function OutputCard({

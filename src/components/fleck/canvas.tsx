@@ -33,6 +33,14 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 
+type ExportAreaDrag = {
+  id: string;
+  pointerId: number;
+  startScreen: Point;
+  startRect: Rect;
+  currentRect: Rect;
+};
+
 function readPalette(): Palette {
   const s = getComputedStyle(document.documentElement);
   const v = (name: string, fallback: string) => s.getPropertyValue(name).trim() || fallback;
@@ -64,6 +72,8 @@ export function Canvas() {
   const execute = useCommandStore((s) => s.execute);
   const newWorkspace = useWorkspaceFilesStore((s) => s.newWorkspace);
   const [dragOver, setDragOver] = useState(false);
+  const [assetPaintVersion, setAssetPaintVersion] = useState(0);
+  const [areaDrag, setAreaDrag] = useState<ExportAreaDrag | null>(null);
   // Workspace point of the last right-click, used to place a new export area there.
   const menuPointRef = useRef<Point>({ x: 0, y: 0 });
   const [menuAreaId, setMenuAreaId] = useState<string | null>(null);
@@ -112,24 +122,35 @@ export function Canvas() {
     return () => ro.disconnect();
   }, [setScreen]);
 
-  // Paint whenever the camera, overlays, document, or size change.
+  const paintModel =
+    model && areaDrag
+      ? {
+          ...model,
+          exportAreas: model.exportAreas.map((area) =>
+            area.id === areaDrag.id ? { ...area, rect: areaDrag.currentRect } : area,
+          ),
+        }
+      : model;
+
+  // Paint whenever the camera, overlays, document, assets, drag preview, or size change.
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx || !model || screen.width === 0) return;
+    if (!canvas || !ctx || !paintModel || screen.width === 0) return;
     const raf = requestAnimationFrame(() => {
       paintScene({
         ctx,
-        model,
+        model: paintModel,
         vp: { origin, zoom, screen },
         overlays,
         palette: paletteRef.current ?? readPalette(),
         dpr: dprRef.current,
         selectedExportAreaId,
+        onAssetsChanged: () => setAssetPaintVersion((v) => v + 1),
       });
     });
     return () => cancelAnimationFrame(raf);
-  }, [model, origin, zoom, screen, overlays, selectedExportAreaId]);
+  }, [paintModel, origin, zoom, screen, overlays, selectedExportAreaId, assetPaintVersion]);
 
   // Focus the canvas on mount so it's the default editor focus.
   useEffect(() => {
@@ -177,6 +198,12 @@ export function Canvas() {
     setSideTab("exports");
   };
 
+  const startAreaDrag = (hit: { id: string; rect: Rect }, e: React.PointerEvent) => {
+    const pt = pointerPos(e);
+    setAreaDrag({ id: hit.id, pointerId: e.pointerId, startScreen: pt, startRect: hit.rect, currentRect: hit.rect });
+    (e.target as Element).setPointerCapture(e.pointerId);
+  };
+
   /** Create a default-sized export area centred on a screen point. */
   const createAreaAt = (screenPt: Point) => {
     const w = screenToWorkspace({ origin, zoom, screen }, screenPt);
@@ -207,8 +234,12 @@ export function Canvas() {
     // (synced to the panel + inspector), empty space marks a new region.
     if (activeTool === "export-area") {
       const hit = areaAtScreen(pointerPos(e));
-      if (hit) selectArea(hit.id);
-      else createAreaAt(pointerPos(e));
+      if (hit) {
+        selectArea(hit.id);
+        startAreaDrag(hit, e);
+      } else {
+        createAreaAt(pointerPos(e));
+      }
     }
   };
 
@@ -221,14 +252,45 @@ export function Canvas() {
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    if (areaDrag && e.pointerId === areaDrag.pointerId) {
+      const current = screenToWorkspace({ origin, zoom, screen }, pointerPos(e));
+      const start = screenToWorkspace({ origin, zoom, screen }, areaDrag.startScreen);
+      const dx = current.x - start.x;
+      const dy = current.y - start.y;
+      setAreaDrag({
+        ...areaDrag,
+        currentRect: {
+          ...areaDrag.startRect,
+          x: areaDrag.startRect.x + dx,
+          y: areaDrag.startRect.y + dy,
+        },
+      });
+      return;
+    }
     if (panning) panByScreen(e.movementX, e.movementY);
   };
 
-  const endPan = (e: React.PointerEvent) => {
-    if (!panning) return;
-    setPanning(false);
+  const endPointer = (e: React.PointerEvent) => {
     const el = e.target as Element;
-    if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    if (areaDrag && e.pointerId === areaDrag.pointerId) {
+      const moved =
+        Math.round(areaDrag.currentRect.x) !== Math.round(areaDrag.startRect.x) ||
+        Math.round(areaDrag.currentRect.y) !== Math.round(areaDrag.startRect.y);
+      if (moved) {
+        execute("export_area.move", {
+          id: areaDrag.id,
+          x: Math.round(areaDrag.currentRect.x),
+          y: Math.round(areaDrag.currentRect.y),
+        });
+      }
+      setAreaDrag(null);
+      if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
+      return;
+    }
+    if (panning) {
+      setPanning(false);
+      if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    }
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -304,6 +366,8 @@ export function Canvas() {
 
   const cursor = panning
     ? "grabbing"
+    : areaDrag
+      ? "move"
     : activeTool === "pan" || spaceHeld
       ? "grab"
       : activeTool === "zoom"
@@ -320,8 +384,8 @@ export function Canvas() {
       aria-label="Workspace canvas"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={endPan}
-      onPointerCancel={endPan}
+      onPointerUp={endPointer}
+      onPointerCancel={endPointer}
       onContextMenu={onContextMenu}
       onKeyDown={onKeyDown}
       onKeyUp={onKeyUp}

@@ -74,7 +74,14 @@ export type ViewportFocusKind = "fit" | "selection" | "export-area" | "actual" |
  */
 export type RenderModel = {
   canvas: { width: number; height: number };
-  layers: { id: string; rect: Rect; color: string; opacity: number; visible: boolean }[];
+  layers: {
+    id: string;
+    rect: Rect;
+    color: string;
+    opacity: number;
+    visible: boolean;
+    imageSrc?: string | null;
+  }[];
   exportAreas: { id: string; name: string; rect: Rect }[];
   guides: { axis: "horizontal" | "vertical"; position: number }[];
   selections: { id: string; rect: Rect }[];
@@ -204,12 +211,18 @@ export type ExportResult = {
 export type ExportArea = {
   id: string;
   name: string;
+  /** Raw bounds in workspace pixels. */
+  bounds: Rect;
   /** Source bounds, e.g. "512 × 512 px". */
   dimensions: string;
   /** Top-left position in workspace pixels, e.g. "0, 0". */
   position: string;
+  /** Raw padding in workspace pixels. */
+  paddingPx: { top: number; right: number; bottom: number; left: number };
   /** Padding summary, e.g. "None" or "8 px" or "T8 R4 B8 L4". */
   padding: string;
+  /** Core background parameter string. */
+  backgroundParam: string;
   /** Background summary, e.g. "Transparent", "Solid #ffffff", "Checkerboard". */
   background: string;
   /** First attached output's format, or "—" when no outputs are configured. */

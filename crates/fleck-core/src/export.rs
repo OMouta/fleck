@@ -179,6 +179,26 @@ pub fn resize_export_area(
     Ok(())
 }
 
+pub fn set_export_area_padding(
+    workspace: &mut Workspace,
+    id: &ObjectId,
+    padding: Padding,
+) -> ExportResult<()> {
+    let area = require_area_mut(workspace, id)?;
+    area.padding = padding;
+    Ok(())
+}
+
+pub fn set_export_area_background(
+    workspace: &mut Workspace,
+    id: &ObjectId,
+    background: ExportBackground,
+) -> ExportResult<()> {
+    let area = require_area_mut(workspace, id)?;
+    area.background = background;
+    Ok(())
+}
+
 pub fn duplicate_export_area(
     workspace: &mut Workspace,
     id: &ObjectId,

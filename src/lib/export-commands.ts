@@ -22,6 +22,8 @@ export const EXPORT_COMMAND_IDS = new Set([
   "export_area.rename",
   "export_area.move",
   "export_area.resize",
+  "export_area.set_padding",
+  "export_area.set_background",
   "export_area.duplicate",
   "export_area.delete",
   "export_area.set_tags",
@@ -65,6 +67,8 @@ export function resolveExportParams(
     commandId === "export_area.rename" ||
     commandId === "export_area.move" ||
     commandId === "export_area.resize" ||
+    commandId === "export_area.set_padding" ||
+    commandId === "export_area.set_background" ||
     commandId === "export_area.duplicate" ||
     commandId === "export_area.delete" ||
     commandId === "export_area.set_tags" ||

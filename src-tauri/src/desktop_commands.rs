@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose, Engine as _};
 use fleck_core::command::{
     default_command_registry, CommandEngine, CommandId, CommandInvocation, CommandParameters,
 };
@@ -126,9 +127,12 @@ pub struct ImageObjectDto {
 pub struct ExportAreaDto {
     id: String,
     name: String,
+    bounds: RectDto,
     dimensions: String,
     position: String,
+    padding_px: PaddingDto,
     padding: String,
+    background_param: String,
     background: String,
     format: String,
     status: String,
@@ -287,18 +291,28 @@ pub struct RectDto {
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
+pub struct PaddingDto {
+    top: f32,
+    right: f32,
+    bottom: f32,
+    left: f32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct CanvasDto {
     width: f32,
     height: f32,
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RenderLayerDto {
     id: String,
     rect: RectDto,
     color: String,
     opacity: f32,
     visible: bool,
+    image_src: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -517,9 +531,7 @@ pub fn relink_asset(_asset_id: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_render_model(state: tauri::State<'_, DesktopState>) -> Result<RenderModelDto, String> {
-    with_document(&state, |document| {
-        Ok(render_model(&document.package.workspace))
-    })
+    with_document(&state, |document| Ok(render_model(&document.package)))
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -620,7 +632,11 @@ pub fn export_all(state: tauri::State<'_, DesktopState>) -> Result<ExportResultD
             &document.package.workspace,
             &DefaultExportOptions::default(),
         ) {
-            Ok(encoded) => Ok(export_result_dto("All areas".to_owned(), encoded, Vec::new())),
+            Ok(encoded) => Ok(export_result_dto(
+                "All areas".to_owned(),
+                encoded,
+                Vec::new(),
+            )),
             Err(fleck_render::ExportPipelineError::NoExportableContent) => Ok(export_result_dto(
                 "All areas".to_owned(),
                 Vec::new(),
@@ -929,19 +945,27 @@ fn export_area_dto(workspace: &Workspace, area: &ExportArea) -> ExportAreaDto {
     ExportAreaDto {
         id: area.id.as_str().to_owned(),
         name: area.name.clone(),
+        bounds: rect_dto(area.bounds),
         dimensions: format!(
             "{} × {} px",
             area.bounds.width.round(),
             area.bounds.height.round()
         ),
         position: format!("{}, {}", area.bounds.x.round(), area.bounds.y.round()),
+        padding_px: padding_dto(area.padding),
         padding: padding_label(&area.padding),
+        background_param: background_param(&area.background),
         background: background_label(&area.background),
         format: outputs
             .first()
             .map(|output| output.format.clone())
             .unwrap_or_else(|| "—".to_owned()),
-        status: if warnings.is_empty() { "ready" } else { "warning" }.to_owned(),
+        status: if warnings.is_empty() {
+            "ready"
+        } else {
+            "warning"
+        }
+        .to_owned(),
         warnings,
         outputs,
     }
@@ -1027,6 +1051,22 @@ fn background_label(background: &ExportBackground) -> String {
     }
 }
 
+fn background_param(background: &ExportBackground) -> String {
+    match background {
+        ExportBackground::Transparent => "transparent".to_owned(),
+        ExportBackground::Solid { color } if color.r == 255 && color.g == 255 && color.b == 255 => {
+            "white".to_owned()
+        }
+        ExportBackground::Solid { color } if color.r == 0 && color.g == 0 && color.b == 0 => {
+            "black".to_owned()
+        }
+        ExportBackground::Solid { color } => {
+            format!("#{:02x}{:02x}{:02x}", color.r, color.g, color.b)
+        }
+        ExportBackground::CheckerboardPreview => "checkerboard_preview".to_owned(),
+    }
+}
+
 fn round1(value: f32) -> f32 {
     (value * 10.0).round() / 10.0
 }
@@ -1086,7 +1126,8 @@ fn command_definition_dto(
     }
 }
 
-fn render_model(workspace: &Workspace) -> RenderModelDto {
+fn render_model(package: &WorkspacePackage) -> RenderModelDto {
+    let workspace = &package.workspace;
     let bounds = default_canvas_rect(workspace);
     RenderModelDto {
         canvas: CanvasDto {
@@ -1103,6 +1144,7 @@ fn render_model(workspace: &Workspace) -> RenderModelDto {
                 color: render_color(index),
                 opacity: layer.opacity,
                 visible: layer.visible,
+                image_src: None,
             })
             .chain(
                 workspace
@@ -1115,6 +1157,7 @@ fn render_model(workspace: &Workspace) -> RenderModelDto {
                         color: render_color(index + workspace.layers.len()),
                         opacity: object.opacity,
                         visible: true,
+                        image_src: image_object_source(package, object),
                     }),
             )
             .collect(),
@@ -1170,6 +1213,30 @@ fn image_object_rect(object: &ImageObject) -> Rect {
     }
 }
 
+fn image_object_source(package: &WorkspacePackage, object: &ImageObject) -> Option<String> {
+    package
+        .workspace
+        .assets
+        .iter()
+        .find(|asset| asset.id == object.source_asset_id)
+        .and_then(|asset| match &asset.source {
+            AssetSource::Linked { path, .. } => Some(path.clone()),
+            AssetSource::Embedded { .. } => package
+                .embedded_assets
+                .iter()
+                .find(|blob| blob.asset_id == asset.id)
+                .map(|blob| embedded_asset_data_url(asset.media_type.as_deref(), &blob.bytes)),
+        })
+}
+
+fn embedded_asset_data_url(media_type: Option<&str>, bytes: &[u8]) -> String {
+    let media_type = media_type.unwrap_or("application/octet-stream");
+    format!(
+        "data:{media_type};base64,{}",
+        general_purpose::STANDARD.encode(bytes)
+    )
+}
+
 fn layer_workspace_rect(layer: &Layer) -> Rect {
     Rect {
         x: layer.position.x + layer.bounds.x,
@@ -1214,6 +1281,15 @@ fn rect_dto(rect: Rect) -> RectDto {
         y: rect.y,
         width: rect.width,
         height: rect.height,
+    }
+}
+
+fn padding_dto(padding: Padding) -> PaddingDto {
+    PaddingDto {
+        top: padding.top,
+        right: padding.right,
+        bottom: padding.bottom,
+        left: padding.left,
     }
 }
 
