@@ -13,6 +13,7 @@ import type {
   CommandDefinition,
   CommandExecution,
   ExportArea,
+  ExportResult,
   HistoryEntry,
   HistoryState,
   ImageObject,
@@ -560,20 +561,86 @@ function exportWarnings(area: MockExportArea, outputs: MockOutput[]): string[] {
   return warnings;
 }
 
+/** Pixel dimensions an output renders to (mirrors `export::output_preview`). */
+function outputPixels(output: MockOutput, padded: { width: number; height: number }): { width: number; height: number } {
+  return {
+    width: output.width ?? Math.max(1, Math.round(padded.width * output.scale)),
+    height: output.height ?? Math.max(1, Math.round(padded.height * output.scale)),
+  };
+}
+
+/**
+ * Rough encoded-size estimate for the export preview (REQ-032). The real
+ * pipeline reports exact bytes after encoding; this heuristic just gives the
+ * preview a representative number per format before anything is written.
+ */
+function estimateBytes(width: number, height: number, format: string, quality: number | null): number {
+  const pixels = width * height;
+  switch (format.toLowerCase()) {
+    case "jpeg":
+      return Math.round(pixels * 0.42 * ((quality ?? 80) / 100));
+    case "webp":
+      return Math.round(pixels * 0.32 * ((quality ?? 80) / 100));
+    case "avif":
+      return Math.round(pixels * 0.22 * ((quality ?? 75) / 100));
+    case "gif":
+      return Math.round(pixels * 0.8);
+    case "png":
+      return Math.round(pixels * 1.9);
+    default:
+      return Math.round(pixels * 1.4);
+  }
+}
+
+/** Human-readable byte size, e.g. "812 B", "12.4 KB", "1.3 MB". */
+function humanBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 /** Project a mock output + the area's padded bounds into the read DTO. */
 function projectOutput(output: MockOutput, padded: { width: number; height: number }): Output {
-  const pixelWidth = output.width ?? Math.max(1, Math.round(padded.width * output.scale));
-  const pixelHeight = output.height ?? Math.max(1, Math.round(padded.height * output.scale));
+  const { width, height } = outputPixels(output, padded);
   return {
     id: output.id,
     filename: output.filename,
     format: formatLabel(output.format),
     scale: scaleLabel(output.scale),
     quality: output.quality,
+    transparency: output.transparency === "flatten" ? "Flatten" : "Preserve",
     destination: output.folder ? `${output.folder}/${output.filename}` : null,
-    dimensions: `${pixelWidth} × ${pixelHeight} px`,
-    bytes: "pending",
+    dimensions: `${width} × ${height} px`,
+    estimatedSize: `~${humanBytes(estimateBytes(width, height, output.format, output.quality))}`,
   };
+}
+
+/** Run an export job over a set of mock areas, producing a representative result. */
+function runMockExport(scope: string, areas: MockExportArea[]): ExportResult {
+  const outputs: ExportResult["outputs"] = [];
+  const warnings = new Set<string>();
+  for (const area of areas) {
+    const padded = paddedPixels(area);
+    const areaOutputs = area.outputIds
+      .map((id) => mockDoc.outputs.find((o) => o.id === id))
+      .filter((o): o is MockOutput => o !== undefined);
+    for (const warning of exportWarnings(area, areaOutputs)) warnings.add(warning);
+    for (const output of areaOutputs) {
+      const { width, height } = outputPixels(output, padded);
+      outputs.push({
+        id: output.id,
+        filename: output.filename,
+        destination: output.folder ? `${output.folder}/${output.filename}` : null,
+        format: formatLabel(output.format),
+        dimensions: `${width} × ${height} px`,
+        // The mock can't encode real pixels, so it reports the estimate as the
+        // produced size; the desktop pipeline returns exact bytes here.
+        size: humanBytes(estimateBytes(width, height, output.format, output.quality)),
+        dataUrl: null,
+      });
+    }
+  }
+  return { scope, outputs, warnings: [...warnings], failures: [] };
 }
 
 /** Project a mock export area (joined with outputs + preview metadata) into the DTO. */
@@ -1056,12 +1123,34 @@ export const api = {
     return bridge("create_export_area", {}, () => undefined);
   },
 
-  exportArea(id: string): Promise<void> {
-    return bridge("export_area", { id }, () => undefined);
+  /** Run the export job for one area; resolves with the produced result/report. */
+  exportArea(id: string): Promise<ExportResult> {
+    return bridge("export_area", { id }, () => {
+      const area = mockDoc.exportAreas.find((a) => a.id === id);
+      return runMockExport(area?.name ?? "Export area", area ? [area] : []);
+    });
   },
 
-  exportAll(): Promise<void> {
-    return bridge("export_all", {}, () => undefined);
+  /** Run the export job for every area; resolves with the aggregate report. */
+  exportAll(): Promise<ExportResult> {
+    return bridge("export_all", {}, () => runMockExport("All areas", mockDoc.exportAreas));
+  },
+
+  /**
+   * Reveal a produced output in the OS file manager. Native integration is
+   * Tauri-backed (TASK-020); the mock stands in for a browser dev session.
+   */
+  revealExportedFile(destination: string): Promise<void> {
+    return bridge("reveal_exported_file", { destination }, () => undefined);
+  },
+
+  /**
+   * Copy an export result to the clipboard. `mode` selects image bytes vs. a
+   * Base64 / Markdown text encoding. Native clipboard access is Tauri-backed
+   * (TASK-020); the mock stands in for a browser dev session.
+   */
+  copyExportResult(outputId: string, mode: "image" | "base64" | "markdown"): Promise<void> {
+    return bridge("copy_export_result", { outputId, mode }, () => undefined);
   },
 
   // --- Command engine ---------------------------------------------------------

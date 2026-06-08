@@ -167,6 +167,15 @@ export const COMMAND_DEFINITIONS: CommandDefinition[] = [
     ],
   },
   {
+    id: "export.preview",
+    label: "Preview export",
+    description: "Open the export preview for the selected area.",
+    group: "export",
+    aliases: ["export preview", "show export preview"],
+    undoable: false,
+    parameterPrompts: [],
+  },
+  {
     id: "export.area-selected",
     label: "Export selected area",
     description: "Export the currently selected export area.",

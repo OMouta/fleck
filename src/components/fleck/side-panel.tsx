@@ -983,7 +983,7 @@ function round(n: number): number {
 // --- Exports panel -----------------------------------------------------------
 
 /** Export-area actions an action surface can request; mapped to core flows below. */
-type ExportAreaAction = "rename" | "duplicate" | "delete" | "export" | "zoom" | "add-output";
+type ExportAreaAction = "rename" | "duplicate" | "delete" | "export" | "zoom" | "add-output" | "preview";
 
 /** Output actions an action surface can request. */
 type OutputAction = "duplicate" | "detach" | "remove";
@@ -992,6 +992,7 @@ function ExportsPanel() {
   const { data: areas = [], isLoading } = useExportAreas();
   const selectedId = useUIStore((s) => s.selectedExportAreaId);
   const setSelected = useUIStore((s) => s.setSelectedExportAreaId);
+  const setExportPreviewOpen = useUIStore((s) => s.setExportPreviewOpen);
   const execute = useCommandStore((s) => s.execute);
   const focus = useViewportStore((s) => s.focus);
 
@@ -1015,6 +1016,10 @@ function ExportsPanel() {
         break;
       case "export":
         api.exportArea(area.id);
+        break;
+      case "preview":
+        setSelected(area.id);
+        setExportPreviewOpen(true);
         break;
       case "zoom":
         setSelected(area.id);
@@ -1171,6 +1176,10 @@ function ExportAreaRow({
 function ExportAreaMenu({ onAction }: { onAction: (action: ExportAreaAction) => void }) {
   return (
     <ContextMenuContent>
+      <ContextMenuItem onSelect={() => onAction("preview")}>
+        <Eye />
+        Preview export…
+      </ContextMenuItem>
       <ContextMenuItem onSelect={() => onAction("export")}>
         <FileDown />
         Export area
@@ -1303,11 +1312,20 @@ function ExportInspector({
         </div>
       )}
 
-      <div className="mt-3 grid grid-cols-2 gap-1.5 border-t border-border pt-3">
-        <InspectorButton onClick={() => onAreaAction("export")} icon={FileDown} label="Export" />
-        <InspectorButton onClick={() => onAreaAction("zoom")} icon={Maximize2} label="Zoom to" />
-        <InspectorButton onClick={() => onAreaAction("duplicate")} icon={Copy} label="Duplicate" />
-        <InspectorButton onClick={() => onAreaAction("delete")} icon={Trash2} label="Delete" destructive />
+      <div className="mt-3 border-t border-border pt-3">
+        <button
+          onClick={() => onAreaAction("preview")}
+          className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-primary text-[12px] font-medium text-primary-foreground transition-transform active:scale-[0.99]"
+        >
+          <Eye className="size-3.5" />
+          Preview export…
+        </button>
+        <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+          <InspectorButton onClick={() => onAreaAction("export")} icon={FileDown} label="Export" />
+          <InspectorButton onClick={() => onAreaAction("zoom")} icon={Maximize2} label="Zoom to" />
+          <InspectorButton onClick={() => onAreaAction("duplicate")} icon={Copy} label="Duplicate" />
+          <InspectorButton onClick={() => onAreaAction("delete")} icon={Trash2} label="Delete" destructive />
+        </div>
       </div>
     </div>
   );

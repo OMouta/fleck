@@ -35,6 +35,10 @@ type UIState = {
   setSideTab: (tab: SideTab) => void;
   selectedExportAreaId: string | null;
   setSelectedExportAreaId: (id: string | null) => void;
+
+  // Export preview/result dialog visibility (targets the selected export area).
+  exportPreviewOpen: boolean;
+  setExportPreviewOpen: (open: boolean) => void;
 };
 
 export const useUIStore = create<UIState>((set) => ({
@@ -55,4 +59,7 @@ export const useUIStore = create<UIState>((set) => ({
   setSideTab: (tab) => set({ sideTab: tab }),
   selectedExportAreaId: null,
   setSelectedExportAreaId: (id) => set({ selectedExportAreaId: id }),
+
+  exportPreviewOpen: false,
+  setExportPreviewOpen: (open) => set({ exportPreviewOpen: open }),
 }));

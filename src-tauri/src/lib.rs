@@ -222,6 +222,8 @@ pub fn run() {
             desktop_commands::create_export_area,
             desktop_commands::export_area,
             desktop_commands::export_all,
+            desktop_commands::reveal_exported_file,
+            desktop_commands::copy_export_result,
             desktop_commands::run_command,
             desktop_commands::undo,
             desktop_commands::redo,

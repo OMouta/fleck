@@ -5,6 +5,7 @@ import { Canvas } from "@/components/fleck/canvas";
 import { SidePanel } from "@/components/fleck/side-panel";
 import { StatusBar } from "@/components/fleck/status-bar";
 import { CommandPalette } from "@/components/fleck/command-palette";
+import { ExportPreviewDialog } from "@/components/fleck/export-preview-dialog";
 import { WorkspaceDialogs } from "@/components/fleck/workspace-dialogs";
 import { TOOLS } from "@/lib/fleck-data";
 import { openImageFlow, pasteImageFlow } from "@/lib/image-import";
@@ -163,6 +164,7 @@ function App() {
       </div>
       <StatusBar />
       <CommandPalette />
+      <ExportPreviewDialog />
       <WorkspaceDialogs />
     </main>
   );

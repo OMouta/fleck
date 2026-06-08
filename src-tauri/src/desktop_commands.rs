@@ -4,7 +4,7 @@ use fleck_core::command::{
 use fleck_core::export::{preview_export_area, ExportWarning, OutputScale};
 use fleck_core::model::{
     AssetSource, ExportArea, ExportBackground, HistoryState, ImageObject, JsonValue, Layer,
-    ObjectId, OutputFormat, Padding, Rect, Workspace,
+    ObjectId, OutputFormat, Padding, Rect, TransparencyBehavior, Workspace,
 };
 use fleck_core::persistence::{
     load_package_from_path, save_package_to_path, LoadWarning, WorkspacePackage,
@@ -53,6 +53,8 @@ pub const REGISTERED_TAURI_COMMANDS: &[&str] = &[
     "create_export_area",
     "export_area",
     "export_all",
+    "reveal_exported_file",
+    "copy_export_result",
     "run_command",
     "undo",
     "redo",
@@ -142,9 +144,38 @@ pub struct OutputDto {
     format: String,
     scale: String,
     quality: Option<u8>,
+    transparency: String,
     destination: Option<String>,
     dimensions: String,
-    bytes: String,
+    estimated_size: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportResultDto {
+    scope: String,
+    outputs: Vec<ExportResultOutputDto>,
+    warnings: Vec<String>,
+    failures: Vec<ExportFailureDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportResultOutputDto {
+    id: String,
+    filename: String,
+    destination: Option<String>,
+    format: String,
+    dimensions: String,
+    size: String,
+    data_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportFailureDto {
+    filename: String,
+    reason: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -555,31 +586,87 @@ pub fn create_export_area(state: tauri::State<'_, DesktopState>) -> Result<(), S
 }
 
 #[tauri::command]
-pub fn export_area(state: tauri::State<'_, DesktopState>, id: String) -> Result<(), String> {
+pub fn export_area(
+    state: tauri::State<'_, DesktopState>,
+    id: String,
+) -> Result<ExportResultDto, String> {
     with_document(&state, |document| {
+        let workspace = &document.package.workspace;
         let id = ObjectId::new(id).map_err(|error| error.to_string())?;
-        match SkiaViewportRenderer::new().export_area(&document.package.workspace, &id) {
-            Ok(_) => {}
-            Err(fleck_render::ExportPipelineError::AreaHasNoOutputs { .. }) => {}
-            Err(error) => return Err(error.to_string()),
+        let scope = workspace
+            .export_areas
+            .iter()
+            .find(|area| area.id == id)
+            .map(|area| area.name.clone())
+            .unwrap_or_else(|| "Export area".to_owned());
+        let warnings = preview_export_area(workspace, &id)
+            .map(|preview| preview.warnings.iter().map(export_warning_label).collect())
+            .unwrap_or_default();
+        match SkiaViewportRenderer::new().export_area(workspace, &id) {
+            Ok(encoded) => Ok(export_result_dto(scope, encoded, warnings)),
+            // An area with no outputs is a no-op job, not an error — report it.
+            Err(fleck_render::ExportPipelineError::AreaHasNoOutputs { .. }) => {
+                Ok(export_result_dto(scope, Vec::new(), warnings))
+            }
+            Err(error) => Err(error.to_string()),
         }
-        Ok(())
     })
 }
 
 #[tauri::command]
-pub fn export_all(state: tauri::State<'_, DesktopState>) -> Result<(), String> {
+pub fn export_all(state: tauri::State<'_, DesktopState>) -> Result<ExportResultDto, String> {
     with_document(&state, |document| {
         match SkiaViewportRenderer::new().export_all(
             &document.package.workspace,
             &DefaultExportOptions::default(),
         ) {
-            Ok(_) => {}
-            Err(fleck_render::ExportPipelineError::NoExportableContent) => {}
-            Err(error) => return Err(error.to_string()),
+            Ok(encoded) => Ok(export_result_dto("All areas".to_owned(), encoded, Vec::new())),
+            Err(fleck_render::ExportPipelineError::NoExportableContent) => Ok(export_result_dto(
+                "All areas".to_owned(),
+                Vec::new(),
+                vec!["No visible exportable content".to_owned()],
+            )),
+            Err(error) => Err(error.to_string()),
         }
-        Ok(())
     })
+}
+
+/// Reveal a produced output in the OS file manager. Real native reveal is
+/// Tauri-backed (TASK-020); this stub keeps the frontend contract registered.
+#[tauri::command(rename_all = "camelCase")]
+pub fn reveal_exported_file(_destination: String) -> Result<(), String> {
+    Ok(())
+}
+
+/// Copy an export result to the clipboard. Real native clipboard access is
+/// Tauri-backed (TASK-020); this stub keeps the frontend contract registered.
+#[tauri::command(rename_all = "camelCase")]
+pub fn copy_export_result(_output_id: String, _mode: String) -> Result<(), String> {
+    Ok(())
+}
+
+fn export_result_dto(
+    scope: String,
+    encoded: Vec<fleck_render::EncodedExport>,
+    warnings: Vec<String>,
+) -> ExportResultDto {
+    ExportResultDto {
+        scope,
+        outputs: encoded
+            .into_iter()
+            .map(|export| ExportResultOutputDto {
+                id: export.filename.clone(),
+                filename: export.filename,
+                destination: export.destination,
+                format: output_format_label(export.format).to_owned(),
+                dimensions: format!("{} × {} px", export.width, export.height),
+                size: human_bytes(export.bytes.len() as u64),
+                data_url: None,
+            })
+            .collect(),
+        warnings,
+        failures: Vec::new(),
+    }
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -787,12 +874,11 @@ fn export_area_dto(workspace: &Workspace, area: &ExportArea) -> ExportAreaDto {
     // Source warnings + per-output preview dimensions from core preview metadata
     // so the UI consumes the same numbers/warnings the export pipeline would.
     let preview = preview_export_area(workspace, &area.id).ok();
-    let quality_of = |output_id: &str| {
+    let definition_of = |output_id: &str| {
         workspace
             .outputs
             .iter()
             .find(|output| output.id.as_str() == output_id)
-            .and_then(|output| output.quality)
     };
     let outputs = preview
         .as_ref()
@@ -800,15 +886,32 @@ fn export_area_dto(workspace: &Workspace, area: &ExportArea) -> ExportAreaDto {
             preview
                 .outputs
                 .iter()
-                .map(|output| OutputDto {
-                    id: output.output_id.as_str().to_owned(),
-                    filename: output.filename.clone(),
-                    format: output_format_label(output.format).to_owned(),
-                    scale: scale_label(output.scale),
-                    quality: quality_of(output.output_id.as_str()),
-                    destination: output.destination.clone(),
-                    dimensions: format!("{} × {} px", output.pixel_width, output.pixel_height),
-                    bytes: "pending".to_owned(),
+                .map(|output| {
+                    let definition = definition_of(output.output_id.as_str());
+                    let quality = definition.and_then(|definition| definition.quality);
+                    let transparency = definition
+                        .map(|definition| transparency_label(definition.transparency))
+                        .unwrap_or("Preserve")
+                        .to_owned();
+                    OutputDto {
+                        id: output.output_id.as_str().to_owned(),
+                        filename: output.filename.clone(),
+                        format: output_format_label(output.format).to_owned(),
+                        scale: scale_label(output.scale),
+                        quality,
+                        transparency,
+                        destination: output.destination.clone(),
+                        dimensions: format!("{} × {} px", output.pixel_width, output.pixel_height),
+                        estimated_size: format!(
+                            "~{}",
+                            human_bytes(estimate_bytes(
+                                output.pixel_width,
+                                output.pixel_height,
+                                output.format,
+                                quality,
+                            ))
+                        ),
+                    }
                 })
                 .collect::<Vec<_>>()
         })
@@ -863,6 +966,38 @@ fn output_format_label(format: OutputFormat) -> &'static str {
 fn scale_label(scale: OutputScale) -> String {
     let value = scale.numerator as f32 / scale.denominator as f32;
     format!("{}×", (value * 1000.0).round() / 1000.0)
+}
+
+fn transparency_label(transparency: TransparencyBehavior) -> &'static str {
+    match transparency {
+        TransparencyBehavior::Preserve => "Preserve",
+        TransparencyBehavior::Flatten => "Flatten",
+    }
+}
+
+/// Rough encoded-size estimate for the export preview (REQ-032). Mirrors the
+/// frontend heuristic; the real exact size is reported after encoding.
+fn estimate_bytes(width: u32, height: u32, format: OutputFormat, quality: Option<u8>) -> u64 {
+    let pixels = width as f64 * height as f64;
+    let factor = match format {
+        OutputFormat::Jpeg => 0.42 * (quality.unwrap_or(80) as f64 / 100.0),
+        OutputFormat::WebP => 0.32 * (quality.unwrap_or(80) as f64 / 100.0),
+        OutputFormat::Avif => 0.22 * (quality.unwrap_or(75) as f64 / 100.0),
+        OutputFormat::Gif => 0.8,
+        OutputFormat::Png => 1.9,
+        _ => 1.4,
+    };
+    (pixels * factor).round() as u64
+}
+
+fn human_bytes(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
 }
 
 fn padding_label(padding: &Padding) -> String {

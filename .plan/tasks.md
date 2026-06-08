@@ -370,7 +370,7 @@ Acceptance criteria:
 
 ### TASK-FE-008: Build Basic Export UI
 
-Status: open
+Status: done
 
 Requirements: REQ-029, REQ-032, REQ-033
 

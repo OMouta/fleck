@@ -159,12 +159,41 @@ export type Output = {
   scale: string;
   /** Lossy quality 0–100, or null for lossless/unset formats. */
   quality: number | null;
+  /** Transparency handling label ("Preserve" / "Flatten"). */
+  transparency: string;
   /** Resolved destination path (folder + filename), or null for next-to-workspace. */
   destination: string | null;
   /** Preview pixel dimensions after padding + scale (e.g. "512 × 512 px"). */
   dimensions: string;
-  /** Estimated output size; "pending" until a real export runs. */
-  bytes: string;
+  /** Estimated output size before export (e.g. "~128 KB"). */
+  estimatedSize: string;
+};
+
+/** A single produced output from an export job (mirrors `fleck-render::EncodedExport`). */
+export type ExportResultOutput = {
+  id: string;
+  filename: string;
+  destination: string | null;
+  format: string;
+  dimensions: string;
+  /** Actual encoded byte size, formatted (e.g. "131 KB"). */
+  size: string;
+  /** Base64 data URL for a result thumbnail, when the backend provides one. */
+  dataUrl: string | null;
+};
+
+/**
+ * Result of running an export job (`export_area` / `export_all`). Drives the
+ * "preview / copy / reveal result" affordances of the export dialog.
+ */
+export type ExportResult = {
+  /** What was exported, e.g. an area name or "All areas". */
+  scope: string;
+  outputs: ExportResultOutput[];
+  /** Warnings surfaced by the job (sourced from core export preview metadata). */
+  warnings: string[];
+  /** Outputs that failed to export, with a reason. */
+  failures: { filename: string; reason: string }[];
 };
 
 /**

@@ -45,6 +45,24 @@ export const useCommandStore = create<CommandState>((set, get) => ({
   lastInvocation: null,
 
   execute: async (id, parameters = {}) => {
+    // UI-only commands are performed on the frontend (no core mutation). The
+    // export preview dialog targets the currently selected export area.
+    if (id === "export.preview") {
+      useUIStore.getState().setExportPreviewOpen(true);
+      return;
+    }
+    // Export actions call the backend export jobs directly (they are not core
+    // commands and don't run through the engine/history).
+    if (id === "export.area-selected") {
+      const areaId = useUIStore.getState().selectedExportAreaId;
+      if (areaId) await api.exportArea(areaId);
+      return;
+    }
+    if (id === "export.all") {
+      await api.exportAll();
+      return;
+    }
+
     // Layer and image-object commands need core IDs generated and the target
     // defaulted to the current selection before they reach the engine (see the
     // layer-commands / image-commands resolvers).
