@@ -13,6 +13,7 @@ import { queryKeys } from "@/lib/queries";
 import { LAYER_COMMAND_IDS, resolveLayerParams } from "@/lib/layer-commands";
 import { IMAGE_COMMAND_IDS, resolveImageParams } from "@/lib/image-commands";
 import { EXPORT_COMMAND_IDS, resolveExportParams } from "@/lib/export-commands";
+import { SELECTION_COMMAND_IDS, resolveSelectionParams } from "@/lib/selection-commands";
 import { useUIStore } from "@/store/ui-store";
 
 const RECENT_LIMIT = 6;
@@ -70,6 +71,8 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     let createdLayerId: string | null = null;
     let createdImageObjectId: string | null = null;
     let createdExportAreaId: string | null = null;
+    let createdSelectionId: string | null = null;
+    let clearActiveSelection = false;
     if (LAYER_COMMAND_IDS.has(id)) {
       const resolved = resolveLayerParams(id, parameters, useUIStore.getState().selectedLayerId);
       runParams = resolved.parameters;
@@ -84,6 +87,13 @@ export const useCommandStore = create<CommandState>((set, get) => ({
       const resolved = resolveExportParams(id, parameters, useUIStore.getState().selectedExportAreaId, null);
       runParams = resolved.parameters;
       createdExportAreaId = resolved.createdAreaId;
+    } else if (SELECTION_COMMAND_IDS.has(id)) {
+      const resolved = resolveSelectionParams(id, parameters, useUIStore.getState().activeSelectionId);
+      runParams = resolved.parameters;
+      createdSelectionId = resolved.createdSelectionId;
+      createdLayerId = resolved.createdLayerId;
+      createdExportAreaId = resolved.createdExportAreaId;
+      clearActiveSelection = resolved.removesSelection;
     }
 
     await api.runCommand(id, runParams);
@@ -95,6 +105,8 @@ export const useCommandStore = create<CommandState>((set, get) => ({
       useUIStore.getState().setSelectedExportAreaId(createdExportAreaId);
       useUIStore.getState().setSideTab("exports");
     }
+    if (createdSelectionId) useUIStore.getState().setActiveSelectionId(createdSelectionId);
+    if (clearActiveSelection) useUIStore.getState().setActiveSelectionId(null);
 
     set((s) => ({
       lastInvocation: { id, parameters },

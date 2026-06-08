@@ -5,6 +5,7 @@ import { useUIStore } from "@/store/ui-store";
 import { useWorkspaceFilesStore } from "@/store/workspace-files-store";
 import { useCommandStore } from "@/store/command-store";
 import { FileMenu } from "@/components/fleck/file-menu";
+import { SelectMenu } from "@/components/fleck/select-menu";
 import { WindowControls } from "@/components/fleck/window-controls";
 
 function FleckMark() {
@@ -53,7 +54,16 @@ export function MenuBar({ isMacDesktop = false }: { isMacDesktop?: boolean }) {
             <div className="h-4 w-px bg-border" />
             <nav className="hidden items-center gap-0.5 md:flex" aria-label="Main menu">
               <FileMenu />
-              {["Edit", "Layer", "Select", "Export", "View"].map((item) => (
+              {["Edit", "Layer"].map((item) => (
+                <button
+                  key={item}
+                  className="rounded-md px-2.5 py-1 text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  {item}
+                </button>
+              ))}
+              <SelectMenu />
+              {["Export", "View"].map((item) => (
                 <button
                   key={item}
                   className="rounded-md px-2.5 py-1 text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"

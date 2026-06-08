@@ -18,12 +18,14 @@ import { paintScene, type Palette } from "@/lib/render";
 import type { Point, Rect } from "@/lib/fleck-data";
 import { cn } from "@/lib/utils";
 import { openImageFlow, dropImageFlow } from "@/lib/image-import";
-import { screenToWorkspace } from "@/lib/viewport";
+import { screenToWorkspace, workspaceToScreen } from "@/lib/viewport";
 import { DEFAULT_EXPORT_AREA_SIZE } from "@/lib/export-commands";
+import { SELECTION_NUDGE, SELECTION_NUDGE_LARGE } from "@/lib/selection-commands";
 import { useUIStore } from "@/store/ui-store";
 import { useViewportStore } from "@/store/viewport-store";
 import { useCommandStore } from "@/store/command-store";
 import { useWorkspaceFilesStore } from "@/store/workspace-files-store";
+import { SelectionHUD } from "@/components/fleck/selection-hud";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -40,6 +42,18 @@ type ExportAreaDrag = {
   startRect: Rect;
   currentRect: Rect;
 };
+
+/**
+ * In-flight selection geometry being drawn by the user. Committed on pointer-up
+ * (marquee / freehand lasso / wand) or on dblclick / Enter (polygon).
+ *
+ * Stored in workspace coordinates so screen-space repaints stay consistent
+ * across zoom/pan while the drag is alive.
+ */
+type SelectionDraft =
+  | { kind: "rect"; pointerId: number; start: Point; current: Point }
+  | { kind: "lasso"; pointerId: number; points: Point[] }
+  | { kind: "polygon"; points: Point[]; cursor: Point | null };
 
 function readPalette(): Palette {
   const s = getComputedStyle(document.documentElement);
@@ -66,14 +80,19 @@ export function Canvas() {
   const spaceRef = useRef(false);
 
   const activeTool = useUIStore((s) => s.activeTool);
+  const marqueeShape = useUIStore((s) => s.marqueeShape);
+  const lassoMode = useUIStore((s) => s.lassoMode);
   const selectedExportAreaId = useUIStore((s) => s.selectedExportAreaId);
   const setSelectedExportAreaId = useUIStore((s) => s.setSelectedExportAreaId);
   const setSideTab = useUIStore((s) => s.setSideTab);
+  const activeSelectionId = useUIStore((s) => s.activeSelectionId);
+  const setActiveSelectionId = useUIStore((s) => s.setActiveSelectionId);
   const execute = useCommandStore((s) => s.execute);
   const newWorkspace = useWorkspaceFilesStore((s) => s.newWorkspace);
   const [dragOver, setDragOver] = useState(false);
   const [assetPaintVersion, setAssetPaintVersion] = useState(0);
   const [areaDrag, setAreaDrag] = useState<ExportAreaDrag | null>(null);
+  const [selectionDraft, setSelectionDraft] = useState<SelectionDraft | null>(null);
   // Workspace point of the last right-click, used to place a new export area there.
   const menuPointRef = useRef<Point>({ x: 0, y: 0 });
   const [menuAreaId, setMenuAreaId] = useState<string | null>(null);
@@ -216,6 +235,47 @@ export function Canvas() {
     });
   };
 
+  const workspaceFromScreen = (pt: Point): Point => screenToWorkspace({ origin, zoom, screen }, pt);
+
+  const startSelectionDraft = (e: React.PointerEvent) => {
+    const screenPt = pointerPos(e);
+    const wp = workspaceFromScreen(screenPt);
+    (e.target as Element).setPointerCapture(e.pointerId);
+    if (activeTool === "marquee") {
+      setSelectionDraft({ kind: "rect", pointerId: e.pointerId, start: wp, current: wp });
+    } else if (activeTool === "lasso" && lassoMode === "freehand") {
+      setSelectionDraft({ kind: "lasso", pointerId: e.pointerId, points: [wp] });
+    }
+  };
+
+  const commitMarqueeDraft = (draft: Extract<SelectionDraft, { kind: "rect" }>) => {
+    const x = Math.round(Math.min(draft.start.x, draft.current.x));
+    const y = Math.round(Math.min(draft.start.y, draft.current.y));
+    const width = Math.max(1, Math.round(Math.abs(draft.current.x - draft.start.x)));
+    const height = Math.max(1, Math.round(Math.abs(draft.current.y - draft.start.y)));
+    const commandId = marqueeShape === "ellipse" ? "selection.ellipse" : "selection.rect";
+    execute(commandId, { x, y, width, height });
+  };
+
+  const commitLassoDraft = (draft: Extract<SelectionDraft, { kind: "lasso" }>) => {
+    // Need at least a triangle for a valid mask; otherwise treat as a wand-style click.
+    if (draft.points.length < 3) {
+      const point = draft.points[0];
+      const x = Math.round(point.x);
+      const y = Math.round(point.y);
+      execute("selection.rect", { x, y, width: 1, height: 1 });
+      return;
+    }
+    execute("selection.lasso", { points: draft.points.map((p) => ({ x: p.x, y: p.y })) });
+  };
+
+  const commitPolygonDraft = (draft: Extract<SelectionDraft, { kind: "polygon" }>) => {
+    if (draft.points.length >= 3) {
+      execute("selection.polygon", { points: draft.points.map((p) => ({ x: p.x, y: p.y })) });
+    }
+    setSelectionDraft(null);
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     const wantsPan = e.button === 1 || activeTool === "pan" || spaceRef.current;
     if (wantsPan) {
@@ -240,6 +300,30 @@ export function Canvas() {
       } else {
         createAreaAt(pointerPos(e));
       }
+      return;
+    }
+    if (activeTool === "marquee" || (activeTool === "lasso" && lassoMode === "freehand")) {
+      startSelectionDraft(e);
+      return;
+    }
+    if (activeTool === "lasso" && lassoMode === "polygon") {
+      const wp = workspaceFromScreen(pointerPos(e));
+      setSelectionDraft((prev) =>
+        prev?.kind === "polygon"
+          ? { ...prev, points: [...prev.points, wp], cursor: wp }
+          : { kind: "polygon", points: [wp], cursor: wp },
+      );
+      return;
+    }
+    if (activeTool === "wand") {
+      const wp = workspaceFromScreen(pointerPos(e));
+      execute("selection.magic_wand", {
+        x: Math.round(wp.x),
+        y: Math.round(wp.y),
+        width: 1,
+        height: 1,
+      });
+      return;
     }
   };
 
@@ -267,6 +351,21 @@ export function Canvas() {
       });
       return;
     }
+    if (selectionDraft) {
+      const wp = workspaceFromScreen(pointerPos(e));
+      if (selectionDraft.kind === "rect" && e.pointerId === selectionDraft.pointerId) {
+        setSelectionDraft({ ...selectionDraft, current: wp });
+        return;
+      }
+      if (selectionDraft.kind === "lasso" && e.pointerId === selectionDraft.pointerId) {
+        setSelectionDraft({ ...selectionDraft, points: [...selectionDraft.points, wp] });
+        return;
+      }
+      if (selectionDraft.kind === "polygon") {
+        setSelectionDraft({ ...selectionDraft, cursor: wp });
+        return;
+      }
+    }
     if (panning) panByScreen(e.movementX, e.movementY);
   };
 
@@ -287,6 +386,13 @@ export function Canvas() {
       if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
       return;
     }
+    if (selectionDraft && selectionDraft.kind !== "polygon" && e.pointerId === selectionDraft.pointerId) {
+      if (selectionDraft.kind === "rect") commitMarqueeDraft(selectionDraft);
+      else if (selectionDraft.kind === "lasso") commitLassoDraft(selectionDraft);
+      setSelectionDraft(null);
+      if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
+      return;
+    }
     if (panning) {
       setPanning(false);
       if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
@@ -300,6 +406,49 @@ export function Canvas() {
       e.preventDefault();
       return;
     }
+
+    // Selection keyboard surface: arrows nudge the active selection (Shift =
+    // larger nudge), Delete clears it, ⌘C / Ctrl+C copies. Falls through to
+    // pan/zoom shortcuts when no selection is active.
+    const nudgeDir: [number, number] | null =
+      e.key === "ArrowLeft"
+        ? [-1, 0]
+        : e.key === "ArrowRight"
+          ? [1, 0]
+          : e.key === "ArrowUp"
+            ? [0, -1]
+            : e.key === "ArrowDown"
+              ? [0, 1]
+              : null;
+    if (activeSelectionId && nudgeDir) {
+      const amount = e.shiftKey ? SELECTION_NUDGE_LARGE : SELECTION_NUDGE;
+      execute("selection.move", { dx: nudgeDir[0] * amount, dy: nudgeDir[1] * amount });
+      e.preventDefault();
+      return;
+    }
+    if (activeSelectionId && (e.key === "Delete" || e.key === "Backspace")) {
+      execute("selection.delete");
+      e.preventDefault();
+      return;
+    }
+    if (activeSelectionId && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c") {
+      execute("selection.copy");
+      e.preventDefault();
+      return;
+    }
+    if (selectionDraft?.kind === "polygon") {
+      if (e.key === "Enter") {
+        commitPolygonDraft(selectionDraft);
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "Escape") {
+        setSelectionDraft(null);
+        e.preventDefault();
+        return;
+      }
+    }
+
     const step = 60;
     switch (e.key) {
       case "+":
@@ -337,6 +486,10 @@ export function Canvas() {
         e.preventDefault();
         break;
     }
+  };
+
+  const onDoubleClick = () => {
+    if (selectionDraft?.kind === "polygon") commitPolygonDraft(selectionDraft);
   };
 
   const onKeyUp = (e: React.KeyboardEvent) => {
@@ -389,6 +542,7 @@ export function Canvas() {
       onContextMenu={onContextMenu}
       onKeyDown={onKeyDown}
       onKeyUp={onKeyUp}
+      onDoubleClick={onDoubleClick}
       onDragOver={onDragOverFiles}
       onDragLeave={onDragLeaveFiles}
       onDrop={onDropFiles}
@@ -406,6 +560,14 @@ export function Canvas() {
       )}
 
       {isEmpty && <EmptyState onOpenImage={() => openImageFlow()} onNewWorkspace={() => newWorkspace()} />}
+
+      <SelectionDraftOverlay
+        draft={selectionDraft}
+        marqueeShape={marqueeShape}
+        vp={{ origin, zoom, screen }}
+      />
+
+      <SelectionHUD />
 
       {/* Active tool indicator (top-left) */}
       <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-md border border-border bg-card/80 px-2.5 py-1.5 text-xs backdrop-blur-sm">
@@ -525,6 +687,69 @@ export function Canvas() {
         )}
       </ContextMenuContent>
     </ContextMenu>
+  );
+}
+
+/**
+ * Lightweight overlay that previews the in-flight selection (rect/ellipse for
+ * marquee, polyline for lasso/polygon). Workspace coordinates are projected on
+ * every render so pan/zoom keep the preview aligned with the canvas paint.
+ */
+function SelectionDraftOverlay({
+  draft,
+  marqueeShape,
+  vp,
+}: {
+  draft: SelectionDraft | null;
+  marqueeShape: "rect" | "ellipse";
+  vp: { origin: Point; zoom: number; screen: { width: number; height: number } };
+}) {
+  if (!draft) return null;
+
+  if (draft.kind === "rect") {
+    const a = workspaceToScreen(vp, draft.start);
+    const b = workspaceToScreen(vp, draft.current);
+    const left = Math.min(a.x, b.x);
+    const top = Math.min(a.y, b.y);
+    const width = Math.abs(b.x - a.x);
+    const height = Math.abs(b.y - a.y);
+    return (
+      <div
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute border border-dashed border-primary bg-primary/10",
+          marqueeShape === "ellipse" && "rounded-[50%]",
+        )}
+        style={{ left, top, width, height }}
+      />
+    );
+  }
+
+  const points = draft.kind === "lasso" ? draft.points : draft.points;
+  const screenPts = points.map((p) => workspaceToScreen(vp, p));
+  const polyline = screenPts.map((p) => `${p.x},${p.y}`).join(" ");
+  const cursor = draft.kind === "polygon" && draft.cursor ? workspaceToScreen(vp, draft.cursor) : null;
+  return (
+    <svg
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 h-full w-full"
+      style={{ overflow: "visible" }}
+    >
+      <polyline points={polyline} fill="rgba(124,156,255,0.10)" stroke="hsl(var(--primary))" strokeDasharray="4 3" strokeWidth={1} />
+      {cursor && screenPts.length > 0 && (
+        <line
+          x1={screenPts[screenPts.length - 1].x}
+          y1={screenPts[screenPts.length - 1].y}
+          x2={cursor.x}
+          y2={cursor.y}
+          stroke="hsl(var(--primary))"
+          strokeDasharray="2 3"
+          strokeWidth={1}
+        />
+      )}
+      {draft.kind === "polygon" &&
+        screenPts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={3} fill="hsl(var(--primary))" />)}
+    </svg>
   );
 }
 

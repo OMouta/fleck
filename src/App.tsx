@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { MenuBar } from "@/components/fleck/menu-bar";
 import { ToolStrip } from "@/components/fleck/tool-strip";
+import { ToolOptionsBar } from "@/components/fleck/tool-options";
 import { Canvas } from "@/components/fleck/canvas";
 import { SidePanel } from "@/components/fleck/side-panel";
 import { StatusBar } from "@/components/fleck/status-bar";
@@ -157,6 +158,7 @@ function App() {
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <MenuBar isMacDesktop={isMacDesktop} />
+      <ToolOptionsBar />
       <div className="flex flex-1 overflow-hidden">
         <ToolStrip />
         <Canvas />

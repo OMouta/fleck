@@ -1,10 +1,11 @@
-import { Maximize, MousePointer2, Crosshair } from "lucide-react";
+import { Maximize, MousePointer2, Crosshair, SquareDashed } from "lucide-react";
 import { TOOLS } from "@/lib/fleck-data";
 import { useWorkspaceMeta } from "@/lib/queries";
 import { useUIStore } from "@/store/ui-store";
 
 export function StatusBar() {
   const activeTool = useUIStore((s) => s.activeTool);
+  const activeSelectionId = useUIStore((s) => s.activeSelectionId);
   const { data: meta } = useWorkspaceMeta();
   const tool = TOOLS.find((t) => t.id === activeTool);
 
@@ -23,8 +24,14 @@ export function StatusBar() {
       </div>
 
       <div className="flex items-center gap-4">
+        {activeSelectionId && (
+          <span className="hidden items-center gap-1.5 text-primary sm:flex" title={activeSelectionId}>
+            <SquareDashed className="size-3" />
+            {activeSelectionId}
+          </span>
+        )}
         <span className="hidden sm:inline">
-          {meta?.layerCount ?? 0} layers · {meta?.selectedCount ?? 0} selected
+          {meta?.layerCount ?? 0} layers · {meta?.selectedCount ?? 0} selections
         </span>
         <span className="flex items-center gap-1.5">
           <Maximize className="size-3" />

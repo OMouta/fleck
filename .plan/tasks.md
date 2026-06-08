@@ -411,7 +411,7 @@ Acceptance criteria:
 
 ### TASK-FE-009: Build Selection Tools And Selection UI
 
-Status: open
+Status: done
 
 Requirements: REQ-008, REQ-016, REQ-038, REQ-045
 
