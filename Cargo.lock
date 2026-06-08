@@ -1083,6 +1083,7 @@ name = "fleck-render"
 version = "0.1.0"
 dependencies = [
  "fleck-core",
+ "image",
  "skia-safe",
  "thiserror 2.0.18",
 ]

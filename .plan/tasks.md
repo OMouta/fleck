@@ -348,7 +348,7 @@ Acceptance criteria:
 
 ### TASK-010: Implement Basic Export Pipeline
 
-Status: open
+Status: done
 
 Requirements: REQ-010, REQ-027, REQ-028, REQ-029, REQ-030, REQ-047, REQ-049
 
