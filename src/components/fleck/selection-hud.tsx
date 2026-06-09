@@ -83,8 +83,8 @@ export function SelectionHUD() {
         />
         <Action
           icon={Frame}
-          label="Export area from selection"
-          onClick={() => run("selection.export_area_from_selection")}
+          label="Area from selection"
+          onClick={() => run("selection.area_from_selection")}
         />
         <Action icon={FileDown} label="Export selection" onClick={() => run("selection.direct_export")} />
         <Divider />

@@ -9,7 +9,7 @@
 import type {
   CommandDefinition,
   CommandExecution,
-  ExportArea,
+  Area,
   ExportResult,
   HistoryState,
   ImageObject,
@@ -55,7 +55,7 @@ export const api = {
   getWorkspaceMeta: () => call<WorkspaceMeta>("get_workspace_meta"),
   getLayers: () => call<Layer[]>("get_layers"),
   getImageObjects: () => call<ImageObject[]>("get_image_objects"),
-  getExportAreas: () => call<ExportArea[]>("get_export_areas"),
+  getAreas: () => call<Area[]>("get_areas"),
   getHistory: () => call<HistoryState>("get_history"),
   getCommands: () => call<CommandDefinition[]>("get_commands"),
 
@@ -82,8 +82,8 @@ export const api = {
   getViewportFocus: (kind: ViewportFocusKind, screen: Size, targetId?: string | null) =>
     call<{ origin: Point; zoom: number } | null>("get_viewport_focus", { kind, screen, targetId: targetId ?? null }),
 
-  createExportArea: () => call<void>("create_export_area"),
-  exportArea: (id: string) => call<ExportResult>("export_area", { id }),
+  createArea: () => call<void>("create_area"),
+  exportArea: (id: string) => call<ExportResult>("area", { id }),
   exportAll: () => call<ExportResult>("export_all"),
   revealExportedFile: (destination: string) => call<void>("reveal_exported_file", { destination }),
   copyExportResult: (outputId: string, mode: "image" | "base64" | "markdown") =>

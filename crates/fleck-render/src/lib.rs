@@ -8,7 +8,7 @@ use fleck_core::model::{
     Axis, BlendMode, CanvasBackground, Layer, Point, Rect, RgbaColor, Workspace,
 };
 use fleck_core::model::{
-    ExportArea, ExportBackground, ExportParticipation, MetadataBehavior, ObjectId,
+    Area, ExportBackground, ExportParticipation, MetadataBehavior, ObjectId,
     OutputDefinition, OutputFormat, Padding, Size, TransparencyBehavior, TrimBehavior,
 };
 use image::codecs::jpeg::JpegEncoder;
@@ -41,7 +41,7 @@ pub struct RenderedFrame {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct OverlaySummary {
     pub checkerboard_drawn: bool,
-    pub export_area_count: usize,
+    pub area_count: usize,
     pub guide_count: usize,
     pub selection_count: usize,
     pub transform_handle_count: usize,
@@ -98,13 +98,13 @@ impl Default for DefaultExportOptions {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExportPipelineError {
-    #[error("export area `{id}` was not found")]
+    #[error("area `{id}` was not found")]
     AreaNotFound { id: ObjectId },
     #[error("selection `{id}` was not found")]
     SelectionNotFound { id: ObjectId },
     #[error("output `{id}` was not found")]
     OutputNotFound { id: ObjectId },
-    #[error("export area `{id}` does not have outputs")]
+    #[error("area `{id}` does not have outputs")]
     AreaHasNoOutputs { id: ObjectId },
     #[error("no visible exportable content is available")]
     NoExportableContent,
@@ -205,13 +205,13 @@ impl SkiaViewportRenderer {
         )
     }
 
-    pub fn export_area(
+    pub fn area(
         &self,
         workspace: &Workspace,
         area_id: &ObjectId,
     ) -> Result<Vec<EncodedExport>, ExportPipelineError> {
         let area = workspace
-            .export_areas
+            .areas
             .iter()
             .find(|area| area.id == *area_id)
             .ok_or_else(|| ExportPipelineError::AreaNotFound {
@@ -227,7 +227,7 @@ impl SkiaViewportRenderer {
             .iter()
             .map(|output_id| {
                 let output = output_by_id(workspace, output_id)?;
-                self.export_area_output(workspace, area, output)
+                self.area_output(workspace, area, output)
             })
             .collect()
     }
@@ -237,14 +237,14 @@ impl SkiaViewportRenderer {
         workspace: &Workspace,
         default_options: &DefaultExportOptions,
     ) -> Result<Vec<EncodedExport>, ExportPipelineError> {
-        if workspace.export_areas.is_empty() {
+        if workspace.areas.is_empty() {
             return Ok(vec![
                 self.export_workspace_default(workspace, default_options)?
             ]);
         }
 
         workspace
-            .export_areas
+            .areas
             .iter()
             .flat_map(|area| {
                 area.output_ids
@@ -253,15 +253,15 @@ impl SkiaViewportRenderer {
             })
             .map(|(area, output_id)| {
                 let output = output_by_id(workspace, output_id)?;
-                self.export_area_output(workspace, area, output)
+                self.area_output(workspace, area, output)
             })
             .collect()
     }
 
-    fn export_area_output(
+    fn area_output(
         &self,
         workspace: &Workspace,
-        area: &ExportArea,
+        area: &Area,
         output: &OutputDefinition,
     ) -> Result<EncodedExport, ExportPipelineError> {
         let bounds = padded_bounds(area.bounds, area.padding);
@@ -279,7 +279,7 @@ impl SkiaViewportRenderer {
         &self,
         workspace: &Workspace,
         bounds: Rect,
-        area: Option<&ExportArea>,
+        area: Option<&Area>,
         output: &OutputDefinition,
         trim: TrimBehavior,
     ) -> Result<EncodedExport, ExportPipelineError> {
@@ -386,7 +386,7 @@ fn padded_bounds(bounds: Rect, padding: Padding) -> Rect {
     }
 }
 
-fn layer_participates_in_area(layer: &Layer, area: &ExportArea) -> bool {
+fn layer_participates_in_area(layer: &Layer, area: &Area) -> bool {
     if !layer.visible
         || layer.opacity <= 0.0
         || layer.export_participation == ExportParticipation::Excluded
@@ -425,7 +425,7 @@ fn scaled_dimension(value: f32, scale: f32) -> u32 {
     (value * scale).round().max(1.0) as u32
 }
 
-fn effective_background(area: Option<&ExportArea>, output: &OutputDefinition) -> ExportBackground {
+fn effective_background(area: Option<&Area>, output: &OutputDefinition) -> ExportBackground {
     match (&area.map(|area| &area.background), &output.background) {
         (Some(ExportBackground::Solid { color }), ExportBackground::Transparent) => {
             ExportBackground::Solid { color: *color }
@@ -462,7 +462,7 @@ fn export_overlay_settings() -> OverlaySettings {
     OverlaySettings {
         checkerboard: false,
         guides: false,
-        export_areas: false,
+        areas: false,
         selections: false,
         transform_handles: false,
         pixel_grid: fleck_core::geometry::PixelGridSettings {
@@ -711,11 +711,11 @@ fn layer_image(raster: &fleck_core::model::RasterPixels) -> Option<Image> {
 }
 
 fn draw_overlays(canvas: &Canvas, request: RenderRequest<'_>, summary: &mut OverlaySummary) {
-    if request.overlays.export_areas {
-        summary.export_area_count = request.workspace.export_areas.len();
+    if request.overlays.areas {
+        summary.area_count = request.workspace.areas.len();
         let mut paint = stroke_paint(Color::from_argb(220, 37, 99, 235), 1.5);
-        for export_area in &request.workspace.export_areas {
-            if let Some(rect) = rect_to_screen(request.viewport, export_area.bounds) {
+        for area in &request.workspace.areas {
+            if let Some(rect) = rect_to_screen(request.viewport, area.bounds) {
                 canvas.draw_rect(rect, &paint);
             }
         }
@@ -934,7 +934,7 @@ mod tests {
     use super::*;
     use fleck_core::geometry::PixelGridSettings;
     use fleck_core::model::{
-        BlendMode, ClippingBehavior, ExportArea, ExportBackground, ExportParticipation, Guide,
+        BlendMode, ClippingBehavior, Area, ExportBackground, ExportParticipation, Guide,
         ObjectId, Padding, Selection, SelectionKind, Size, Transform, TrimBehavior,
     };
 
@@ -1042,7 +1042,7 @@ mod tests {
             source_layer_ids: vec![id("base")],
             mask: None,
         });
-        workspace.export_areas.push(ExportArea {
+        workspace.areas.push(Area {
             id: id("export"),
             name: "Export".to_owned(),
             bounds: rect(0.0, 0.0, 8.0, 8.0),
@@ -1073,7 +1073,7 @@ mod tests {
 
         assert_eq!(frame.overlay_summary.guide_count, 1);
         assert_eq!(frame.overlay_summary.selection_count, 1);
-        assert_eq!(frame.overlay_summary.export_area_count, 1);
+        assert_eq!(frame.overlay_summary.area_count, 1);
         assert_eq!(frame.overlay_summary.transform_handle_count, 4);
         assert!(frame.overlay_summary.pixel_grid_vertical_lines > 0);
         assert!(frame.overlay_summary.pixel_grid_horizontal_lines > 0);
@@ -1093,7 +1093,7 @@ mod tests {
     }
 
     #[test]
-    fn default_export_uses_visible_layer_bounds_without_export_areas() {
+    fn default_export_uses_visible_layer_bounds_without_areas() {
         let mut workspace = workspace();
         workspace
             .layers
@@ -1116,7 +1116,7 @@ mod tests {
     }
 
     #[test]
-    fn export_area_outputs_apply_padding_scale_and_layer_rules() {
+    fn area_outputs_apply_padding_scale_and_layer_rules() {
         let mut workspace = workspace();
         workspace
             .layers
@@ -1127,7 +1127,7 @@ mod tests {
         workspace
             .outputs
             .push(output("png", OutputFormat::Png, 2.0));
-        workspace.export_areas.push(ExportArea {
+        workspace.areas.push(Area {
             id: id("area"),
             name: "Area".to_owned(),
             bounds: rect(0.0, 0.0, 10.0, 10.0),
@@ -1147,7 +1147,7 @@ mod tests {
         });
 
         let exports = SkiaViewportRenderer::new()
-            .export_area(&workspace, &id("area"))
+            .area(&workspace, &id("area"))
             .expect("area export");
 
         assert_eq!(exports.len(), 1);
@@ -1235,7 +1235,7 @@ mod tests {
         workspace
             .outputs
             .push(output("png", OutputFormat::Png, 1.0));
-        workspace.export_areas.push(ExportArea {
+        workspace.areas.push(Area {
             id: id("area"),
             name: "Area".to_owned(),
             bounds: rect(0.0, 0.0, 16.0, 16.0),
@@ -1250,7 +1250,7 @@ mod tests {
         });
 
         let export = SkiaViewportRenderer::new()
-            .export_area(&workspace, &id("area"))
+            .area(&workspace, &id("area"))
             .expect("area export")
             .remove(0);
 
@@ -1277,7 +1277,7 @@ mod tests {
             },
             selections: false,
             transform_handles: false,
-            export_areas: false,
+            areas: false,
         };
         SkiaViewportRenderer::new()
             .render(RenderRequest {

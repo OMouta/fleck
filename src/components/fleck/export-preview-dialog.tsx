@@ -13,9 +13,9 @@ import {
   Loader2,
   X,
 } from "lucide-react";
-import type { ExportArea, ExportResult, ExportResultOutput, Output } from "@/lib/fleck-data";
+import type { Area, ExportResult, ExportResultOutput, Output } from "@/lib/fleck-data";
 import { api } from "@/lib/api";
-import { useExportAreas } from "@/lib/queries";
+import { useAreas } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/ui-store";
 import {
@@ -32,14 +32,14 @@ import {
  * warnings surfaced *before* anything is exported. Running an export then calls
  * the backend job and previews the produced result, with copy/reveal actions.
  *
- * The dialog targets the currently selected export area so it stays in sync with
+ * The dialog targets the currently selected area so it stays in sync with
  * the exports panel and canvas selection.
  */
 export function ExportPreviewDialog() {
   const open = useUIStore((s) => s.exportPreviewOpen);
   const setOpen = useUIStore((s) => s.setExportPreviewOpen);
-  const selectedId = useUIStore((s) => s.selectedExportAreaId);
-  const { data: areas = [] } = useExportAreas();
+  const selectedId = useUIStore((s) => s.selectedAreaId);
+  const { data: areas = [] } = useAreas();
 
   const area = areas.find((a) => a.id === selectedId) ?? areas[0];
 
@@ -52,7 +52,7 @@ export function ExportPreviewDialog() {
     if (open) setResult(null);
   }, [open, area?.id]);
 
-  const runExportArea = async () => {
+  const runArea = async () => {
     if (!area) return;
     setBusy("area");
     try {
@@ -124,21 +124,21 @@ export function ExportPreviewDialog() {
                     Close
                   </button>
                   <button
-                    onClick={runExportArea}
+                    onClick={runArea}
                     disabled={busy !== null}
                     className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-[13px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
                   >
                     {busy === "area" ? <Loader2 className="size-3.5 animate-spin" /> : <FileDown className="size-3.5" />}
-                    {result ? "Export again" : "Export area"}
+                    {result ? "Export again" : "Area"}
                   </button>
                 </div>
               </div>
             </>
           ) : (
             <div className="p-8 text-center">
-              <Dialog.Title className="text-sm font-semibold text-foreground">No export area selected</Dialog.Title>
+              <Dialog.Title className="text-sm font-semibold text-foreground">No area selected</Dialog.Title>
               <Dialog.Description className="mt-1 text-[13px] text-muted-foreground">
-                Create or select an export area to preview its output.
+                Create or select an area to preview its output.
               </Dialog.Description>
             </div>
           )}
@@ -149,7 +149,7 @@ export function ExportPreviewDialog() {
 }
 
 /** Pre-export plan: crop/background/padding + per-output settings + warnings. */
-function ExportPlanView({ area }: { area: ExportArea }) {
+function ExportPlanView({ area }: { area: Area }) {
   return (
     <div className="space-y-4">
       {area.warnings.length > 0 && (

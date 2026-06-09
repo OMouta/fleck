@@ -36,9 +36,9 @@ import {
   Maximize2,
   Unlink,
 } from "lucide-react";
-import type { ExportArea, ImageObject, ImageSourceState, Layer, Output } from "@/lib/fleck-data";
+import type { Area, ImageObject, ImageSourceState, Layer, Output } from "@/lib/fleck-data";
 import { api } from "@/lib/api";
-import { useExportAreas, useHistory, useHistoryJumpSupported, useImageObjects, useLayers } from "@/lib/queries";
+import { useAreas, useHistory, useHistoryJumpSupported, useImageObjects, useLayers } from "@/lib/queries";
 import { BLEND_MODES } from "@/lib/layer-commands";
 import { SOURCE_STATE_LABEL } from "@/lib/image-commands";
 import {
@@ -48,7 +48,7 @@ import {
   SCALE_PRESETS,
   formatParam,
   isLossyFormat,
-} from "@/lib/export-commands";
+} from "@/lib/area-commands";
 import { openImageFlow, pasteImageFlow, replaceImageFlow, revealImageSourceFlow } from "@/lib/image-import";
 import { cn } from "@/lib/utils";
 import { useUIStore, type SideTab } from "@/store/ui-store";
@@ -83,7 +83,7 @@ export function SidePanel() {
   const setTab = useUIStore((s) => s.setSideTab);
   const { data: layers = [] } = useLayers();
   const { data: imageObjects = [] } = useImageObjects();
-  const { data: exportAreas = [] } = useExportAreas();
+  const { data: areas = [] } = useAreas();
 
   return (
     <Tabs value={tab} onValueChange={(v) => setTab(v as SideTab)} asChild>
@@ -91,7 +91,7 @@ export function SidePanel() {
         <TabsList className="border-b border-border p-1.5">
           <PanelTab value="layers" label="Layers" icon={Layers} count={layers.length} active={tab === "layers"} />
           <PanelTab value="images" label="Images" icon={ImageIcon} count={imageObjects.length} active={tab === "images"} />
-          <PanelTab value="exports" label="Exports" icon={FileDown} count={exportAreas.length} active={tab === "exports"} />
+          <PanelTab value="exports" label="Exports" icon={FileDown} count={areas.length} active={tab === "exports"} />
           <PanelTab value="history" label="History" icon={HistoryIcon} active={tab === "history"} />
         </TabsList>
 
@@ -984,15 +984,15 @@ function round(n: number): number {
 // --- Exports panel -----------------------------------------------------------
 
 /** Export-area actions an action surface can request; mapped to core flows below. */
-type ExportAreaAction = "rename" | "duplicate" | "delete" | "export" | "zoom" | "add-output" | "preview";
+type AreaAction = "rename" | "duplicate" | "delete" | "export" | "zoom" | "add-output" | "preview";
 
 /** Output actions an action surface can request. */
 type OutputAction = "duplicate" | "detach" | "remove";
 
 function ExportsPanel() {
-  const { data: areas = [], isLoading } = useExportAreas();
-  const selectedId = useUIStore((s) => s.selectedExportAreaId);
-  const setSelected = useUIStore((s) => s.setSelectedExportAreaId);
+  const { data: areas = [], isLoading } = useAreas();
+  const selectedId = useUIStore((s) => s.selectedAreaId);
+  const setSelected = useUIStore((s) => s.setSelectedAreaId);
   const setExportPreviewOpen = useUIStore((s) => s.setExportPreviewOpen);
   const execute = useCommandStore((s) => s.execute);
   const focus = useViewportStore((s) => s.focus);
@@ -1002,17 +1002,17 @@ function ExportsPanel() {
   const selectedArea = areas.find((a) => a.id === selectedId) ?? areas[0];
 
   // Every export edit routes through the command engine so it is undoable and
-  // recorded in history (see export-commands + command-store).
-  const handleAreaAction = (action: ExportAreaAction, area: ExportArea) => {
+  // recorded in history (see area-commands + command-store).
+  const handleAreaAction = (action: AreaAction, area: Area) => {
     switch (action) {
       case "rename":
         setRenamingId(area.id);
         break;
       case "duplicate":
-        execute("export_area.duplicate", { id: area.id });
+        execute("area.duplicate", { id: area.id });
         break;
       case "delete":
-        execute("export_area.delete", { id: area.id });
+        execute("area.delete", { id: area.id });
         if (selectedId === area.id) setSelected(null);
         break;
       case "export":
@@ -1024,7 +1024,7 @@ function ExportsPanel() {
         break;
       case "zoom":
         setSelected(area.id);
-        focus("export-area", area.id);
+        focus("area", area.id);
         break;
       case "add-output":
         addOutput(area.id);
@@ -1037,20 +1037,20 @@ function ExportsPanel() {
   const addOutput = async (areaId: string) => {
     const id = newExportId("output");
     await execute("output.add", { id, filename: "export.png", format: "png" });
-    await execute("export_area.attach_output", { area_id: areaId, output_id: id });
+    await execute("area.attach_output", { area_id: areaId, output_id: id });
   };
 
-  const handleOutputAction = async (action: OutputAction, area: ExportArea, output: Output) => {
+  const handleOutputAction = async (action: OutputAction, area: Area, output: Output) => {
     switch (action) {
       case "duplicate": {
         // Duplicate registers a detached copy; attach it to the same area.
         const newId = newExportId("output");
         await execute("output.duplicate", { id: output.id, new_id: newId });
-        await execute("export_area.attach_output", { area_id: area.id, output_id: newId });
+        await execute("area.attach_output", { area_id: area.id, output_id: newId });
         break;
       }
       case "detach":
-        execute("export_area.detach_output", { area_id: area.id, output_id: output.id });
+        execute("area.detach_output", { area_id: area.id, output_id: output.id });
         break;
       case "remove":
         execute("output.remove", { id: output.id });
@@ -1058,34 +1058,34 @@ function ExportsPanel() {
     }
   };
 
-  const commitRename = (area: ExportArea, name: string) => {
+  const commitRename = (area: Area, name: string) => {
     setRenamingId(null);
-    if (name && name !== area.name) execute("export_area.rename", { id: area.id, name });
+    if (name && name !== area.name) execute("area.rename", { id: area.id, name });
   };
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Export areas</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Areas</span>
         <button
-          onClick={() => execute("export_area.create", { name: "Export area" })}
+          onClick={() => execute("area.create", { name: "Area" })}
           className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          title="Add export area"
-          aria-label="Add export area"
+          title="Add area"
+          aria-label="Add area"
         >
           <Plus className="size-4" />
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-1.5 pb-2">
-        {isLoading && <p className="px-3 py-4 text-[13px] text-muted-foreground">Loading export areas…</p>}
+        {isLoading && <p className="px-3 py-4 text-[13px] text-muted-foreground">Loading areas…</p>}
         {!isLoading && areas.length === 0 && (
           <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">
-            No export areas yet. Use the export area tool or right-click the canvas to mark a region.
+            No areas yet. Use the area tool or right-click the canvas to mark a region.
           </p>
         )}
         {areas.map((area) => (
-          <ExportAreaRow
+          <AreaRow
             key={area.id}
             area={area}
             selected={selectedArea?.id === area.id}
@@ -1104,11 +1104,11 @@ function ExportsPanel() {
           onAreaAction={(a) => handleAreaAction(a, selectedArea)}
           onOutputAction={(a, output) => handleOutputAction(a, selectedArea, output)}
           onCommitRename={(name) => commitRename(selectedArea, name)}
-          onMoveArea={(x, y) => execute("export_area.move", { id: selectedArea.id, x, y })}
-          onResizeArea={(width, height) => execute("export_area.resize", { id: selectedArea.id, width, height })}
-          onSetAreaPadding={(padding) => execute("export_area.set_padding", { id: selectedArea.id, ...padding })}
+          onMoveArea={(x, y) => execute("area.move", { id: selectedArea.id, x, y })}
+          onResizeArea={(width, height) => execute("area.resize", { id: selectedArea.id, width, height })}
+          onSetAreaPadding={(padding) => execute("area.set_padding", { id: selectedArea.id, ...padding })}
           onSetAreaBackground={(background) =>
-            execute("export_area.set_background", { id: selectedArea.id, background })
+            execute("area.set_background", { id: selectedArea.id, background })
           }
           onSetOutputFormat={(output, format) => execute("output.update", { id: output.id, format })}
           onSetOutputScale={(output, scale) => execute("output.update", { id: output.id, scale })}
@@ -1124,7 +1124,7 @@ function ExportsPanel() {
   );
 }
 
-function ExportAreaRow({
+function AreaRow({
   area,
   selected,
   renaming,
@@ -1133,11 +1133,11 @@ function ExportAreaRow({
   onCommitRename,
   onCancelRename,
 }: {
-  area: ExportArea;
+  area: Area;
   selected: boolean;
   renaming: boolean;
   onSelect: () => void;
-  onAction: (action: ExportAreaAction) => void;
+  onAction: (action: AreaAction) => void;
   onCommitRename: (name: string) => void;
   onCancelRename: () => void;
 }) {
@@ -1174,13 +1174,13 @@ function ExportAreaRow({
           )}
         </div>
       </ContextMenuTrigger>
-      <ExportAreaMenu onAction={onAction} />
+      <AreaMenu onAction={onAction} />
     </ContextMenu>
   );
 }
 
-/** Right-click action list shared by export-area rows and the canvas. */
-function ExportAreaMenu({ onAction }: { onAction: (action: ExportAreaAction) => void }) {
+/** Right-click action list shared by area rows and the canvas. */
+function AreaMenu({ onAction }: { onAction: (action: AreaAction) => void }) {
   return (
     <ContextMenuContent>
       <ContextMenuItem onSelect={() => onAction("preview")}>
@@ -1189,7 +1189,7 @@ function ExportAreaMenu({ onAction }: { onAction: (action: ExportAreaAction) => 
       </ContextMenuItem>
       <ContextMenuItem onSelect={() => onAction("export")}>
         <FileDown />
-        Export area
+        Area
         <ContextMenuShortcut>⌘E</ContextMenuShortcut>
       </ContextMenuItem>
       <ContextMenuItem onSelect={() => onAction("zoom")}>
@@ -1233,13 +1233,13 @@ function ExportInspector({
   onSetOutputScale,
   onSetOutputQuality,
 }: {
-  area: ExportArea;
-  onAreaAction: (action: ExportAreaAction) => void;
+  area: Area;
+  onAreaAction: (action: AreaAction) => void;
   onOutputAction: (action: OutputAction, output: Output) => void;
   onCommitRename: (name: string) => void;
   onMoveArea: (x: number, y: number) => void;
   onResizeArea: (width: number, height: number) => void;
-  onSetAreaPadding: (padding: ExportArea["paddingPx"]) => void;
+  onSetAreaPadding: (padding: Area["paddingPx"]) => void;
   onSetAreaBackground: (background: string) => void;
   onSetOutputFormat: (output: Output, format: string) => void;
   onSetOutputScale: (output: Output, scale: number) => void;
@@ -1402,8 +1402,8 @@ function PaddingControl({
   padding,
   onCommit,
 }: {
-  padding: ExportArea["paddingPx"];
-  onCommit: (padding: ExportArea["paddingPx"]) => void;
+  padding: Area["paddingPx"];
+  onCommit: (padding: Area["paddingPx"]) => void;
 }) {
   const [draft, setDraft] = useState({
     top: String(round(padding.top)),
@@ -1503,7 +1503,7 @@ function BackgroundMenu({ value, onSelect }: { value: string; onSelect: (value: 
       <DropdownMenuTrigger asChild>
         <button
           className="flex h-7 w-full items-center justify-between gap-1 rounded border border-border bg-background px-1.5 text-[11px] text-foreground transition-colors hover:bg-secondary"
-          aria-label="Export area background"
+          aria-label="Area background"
         >
           {current.label}
           <ChevronDown className="size-3 text-muted-foreground" />
@@ -1667,7 +1667,7 @@ function QualityInput({ value, onCommit }: { value: number; onCommit: (quality: 
   );
 }
 
-function StatusDot({ status }: { status: ExportArea["status"] }) {
+function StatusDot({ status }: { status: Area["status"] }) {
   if (status === "ready")
     return (
       <span title="Ready to export" className="flex items-center text-primary">

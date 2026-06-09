@@ -3,7 +3,7 @@
  *
  * The camera is presentation state, so it lives here (UI), not in the document.
  * Pan/zoom math uses the `lib/viewport` helpers that mirror `fleck-core`. Focus
- * actions that need document bounds (fit / selection / export area) route through
+ * actions that need document bounds (fit / selection / area) route through
  * the shared `api` command; actual-size and pixel-perfect are pure camera moves.
  */
 import { create } from "zustand";
@@ -33,8 +33,8 @@ type ViewportState = {
   setPanning: (panning: boolean) => void;
 
   /**
-   * Focus actions: fit / selection / export-area / actual (100%) / pixel-perfect.
-   * `targetId` selects a specific export area to zoom to (defaults to the first).
+   * Focus actions: fit / selection / area / actual (100%) / pixel-perfect.
+   * `targetId` selects a specific area to zoom to (defaults to the first).
    */
   focus: (kind: ViewportFocusKind, targetId?: string | null) => Promise<void>;
 
@@ -55,7 +55,7 @@ export const useViewportStore = create<ViewportState>((set, get) => ({
     pixelGrid: { enabled: true, minZoom: MIN_PIXEL_GRID_ZOOM },
     selections: true,
     transformHandles: true,
-    exportAreas: true,
+    areas: true,
   },
 
   setScreen: (screen) => set({ screen }),

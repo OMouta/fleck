@@ -40,7 +40,7 @@ function invalidateDocument() {
   queryClient.invalidateQueries({ queryKey: queryKeys.workspaceMeta });
   queryClient.invalidateQueries({ queryKey: queryKeys.layers });
   queryClient.invalidateQueries({ queryKey: queryKeys.imageObjects });
-  queryClient.invalidateQueries({ queryKey: queryKeys.exportAreas });
+  queryClient.invalidateQueries({ queryKey: queryKeys.areas });
   queryClient.invalidateQueries({ queryKey: queryKeys.history });
   queryClient.invalidateQueries({ queryKey: queryKeys.renderModel });
 }

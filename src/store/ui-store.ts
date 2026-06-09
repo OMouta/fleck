@@ -2,7 +2,7 @@
  * Zustand store for immediate UI state ONLY.
  *
  * Per `docs/architecture.md` and REQ-036, this store must never hold document
- * truth (layers, export areas, pixels). It only tracks ephemeral interaction
+ * truth (layers, areas, pixels). It only tracks ephemeral interaction
  * state: active tool, selection focus, and panel visibility. Camera/overlay
  * (viewport) state lives in `viewport-store`. Document state lives in the Rust
  * core and is read via TanStack Query.
@@ -88,14 +88,14 @@ type UIState = {
   setPaletteOpen: (open: boolean) => void;
   togglePalette: () => void;
 
-  // Side panel tab + which export area is selected (shared across the exports
+  // Side panel tab + which area is selected (shared across the exports
   // panel, the export inspector, and the canvas highlight/overlay).
   sideTab: SideTab;
   setSideTab: (tab: SideTab) => void;
-  selectedExportAreaId: string | null;
-  setSelectedExportAreaId: (id: string | null) => void;
+  selectedAreaId: string | null;
+  setSelectedAreaId: (id: string | null) => void;
 
-  // Export preview/result dialog visibility (targets the selected export area).
+  // Export preview/result dialog visibility (targets the selected area).
   exportPreviewOpen: boolean;
   setExportPreviewOpen: (open: boolean) => void;
 };
@@ -129,8 +129,8 @@ export const useUIStore = create<UIState>((set) => ({
 
   sideTab: "layers",
   setSideTab: (tab) => set({ sideTab: tab }),
-  selectedExportAreaId: null,
-  setSelectedExportAreaId: (id) => set({ selectedExportAreaId: id }),
+  selectedAreaId: null,
+  setSelectedAreaId: (id) => set({ selectedAreaId: id }),
 
   exportPreviewOpen: false,
   setExportPreviewOpen: (open) => set({ exportPreviewOpen: open }),

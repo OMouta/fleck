@@ -37,7 +37,7 @@ export const TOOLS: Tool[] = [
   { id: "text", name: "Text", shortcut: "T", hint: "Add an editable text layer", icon: Type },
   { id: "shape", name: "Shape", shortcut: "U", hint: "Draw rectangles, lines and arrows", icon: Shapes },
   { id: "picker", name: "Picker", shortcut: "I", hint: "Sample a color from the canvas", icon: Pipette },
-  { id: "export-area", name: "Export area", shortcut: "A", hint: "Mark a named output region", icon: Frame },
+  { id: "area", name: "Area", shortcut: "A", hint: "Mark a named output region", icon: Frame },
   { id: "pan", name: "Pan", shortcut: "Space", hint: "Drag to pan the workspace", icon: Hand },
   { id: "zoom", name: "Zoom", shortcut: "Z", hint: "Zoom into a point", icon: ZoomIn },
 ];
@@ -62,10 +62,10 @@ export type OverlaySettings = {
   pixelGrid: { enabled: boolean; minZoom: number };
   selections: boolean;
   transformHandles: boolean;
-  exportAreas: boolean;
+  areas: boolean;
 };
 
-export type ViewportFocusKind = "fit" | "selection" | "export-area" | "actual" | "pixel-perfect";
+export type ViewportFocusKind = "fit" | "selection" | "area" | "actual" | "pixel-perfect";
 
 /**
  * Read-only workspace geometry needed to draw a frame, in workspace coordinates.
@@ -83,7 +83,7 @@ export type RenderModel = {
     visible: boolean;
     imageSrc?: string | null;
   }[];
-  exportAreas: { id: string; name: string; rect: Rect }[];
+  areas: { id: string; name: string; rect: Rect }[];
   guides: { axis: "horizontal" | "vertical"; position: number }[];
   selections: SelectionRender[];
 };
@@ -203,7 +203,7 @@ export type ExportResultOutput = {
 };
 
 /**
- * Result of running an export job (`export_area` / `export_all`). Drives the
+ * Result of running an export job (`area` / `export_all`). Drives the
  * "preview / copy / reveal result" affordances of the export dialog.
  */
 export type ExportResult = {
@@ -217,11 +217,11 @@ export type ExportResult = {
 };
 
 /**
- * UI projection of `fleck-core::model::ExportArea` joined with its core export
+ * UI projection of `fleck-core::model::Area` joined with its core export
  * preview. `warnings` come straight from `ExportPreview::warnings` (core preview
  * metadata) — the UI displays them, it does not derive them.
  */
-export type ExportArea = {
+export type Area = {
   id: string;
   name: string;
   /** Raw bounds in workspace pixels. */

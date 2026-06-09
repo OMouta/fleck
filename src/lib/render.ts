@@ -34,8 +34,8 @@ type PaintArgs = {
   overlays: OverlaySettings;
   palette: Palette;
   dpr: number;
-  /** Export area to emphasize (kept in sync with the exports panel selection). */
-  selectedExportAreaId?: string | null;
+  /** Area to emphasize (kept in sync with the exports panel selection). */
+  selectedAreaId?: string | null;
   onAssetsChanged?: () => void;
 };
 
@@ -92,7 +92,7 @@ function isLikelyFilePath(src: string): boolean {
   return src.startsWith("/") || /^[A-Za-z]:[\\/]/.test(src);
 }
 
-export function paintScene({ ctx, model, vp, overlays, palette, dpr, selectedExportAreaId, onAssetsChanged }: PaintArgs) {
+export function paintScene({ ctx, model, vp, overlays, palette, dpr, selectedAreaId, onAssetsChanged }: PaintArgs) {
   const { width, height } = vp.screen;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
@@ -123,7 +123,7 @@ export function paintScene({ ctx, model, vp, overlays, palette, dpr, selectedExp
     ctx.strokeRect(canvasRect.x + 0.5, canvasRect.y + 0.5, canvasRect.width, canvasRect.height);
   }
 
-  if (overlays.exportAreas) drawExportAreas(ctx, model, vp, palette, selectedExportAreaId ?? null);
+  if (overlays.areas) drawAreas(ctx, model, vp, palette, selectedAreaId ?? null);
   if (overlays.selections) drawSelections(ctx, model, vp, palette);
   if (overlays.transformHandles) drawTransformHandles(ctx, model, vp, palette);
   if (overlays.guides) drawGuides(ctx, model, vp, palette);
@@ -179,7 +179,7 @@ function drawCheckerboard(ctx: CanvasRenderingContext2D, rect: Rect) {
   ctx.restore();
 }
 
-function drawExportAreas(
+function drawAreas(
   ctx: CanvasRenderingContext2D,
   model: RenderModel,
   vp: Viewport,
@@ -189,7 +189,7 @@ function drawExportAreas(
   ctx.save();
   ctx.strokeStyle = palette.exportArea;
   ctx.font = "11px ui-monospace, monospace";
-  for (const area of model.exportAreas) {
+  for (const area of model.areas) {
     const r = toScreenRect(vp, area.rect);
     const selected = area.id === selectedId;
     // The selected area reads as solid + heavier; others stay dashed and subtle.

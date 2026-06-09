@@ -1,34 +1,34 @@
 /**
- * Frontend ⇆ core glue for export-area and output commands, mirroring the
+ * Frontend ⇆ core glue for area and output commands, mirroring the
  * `layer-commands` / `image-commands` siblings. The exports panel, inspector,
  * canvas context menu, and command palette all express export edits as core
- * command invocations (`export_area.*` / `output.*`) so every mutation is
+ * command invocations (`area.*` / `output.*`) so every mutation is
  * undoable and shows up in history.
  *
  * This module owns the two frontend-only concerns those commands need:
  *
  *  1. Generating the stable object IDs the core requires for created objects
- *     (`export_area.create`/`duplicate`, `output.add`/`duplicate`).
- *  2. Defaulting the target export area (and its primary output) to the current
+ *     (`area.create`/`duplicate`, `output.add`/`duplicate`).
+ *  2. Defaulting the target area (and its primary output) to the current
  *     selection when a caller doesn't pass an explicit one.
  *
  * It is intentionally store-free so the command store can depend on it without
  * an import cycle.
  */
 
-/** Core `export_area.*` / `output.*` command IDs the resolver understands. */
+/** Core `area.*` / `output.*` command IDs the resolver understands. */
 export const EXPORT_COMMAND_IDS = new Set([
-  "export_area.create",
-  "export_area.rename",
-  "export_area.move",
-  "export_area.resize",
-  "export_area.set_padding",
-  "export_area.set_background",
-  "export_area.duplicate",
-  "export_area.delete",
-  "export_area.set_tags",
-  "export_area.attach_output",
-  "export_area.detach_output",
+  "area.create",
+  "area.rename",
+  "area.move",
+  "area.resize",
+  "area.set_padding",
+  "area.set_background",
+  "area.duplicate",
+  "area.delete",
+  "area.set_tags",
+  "area.attach_output",
+  "area.detach_output",
   "output.add",
   "output.remove",
   "output.duplicate",
@@ -37,18 +37,18 @@ export const EXPORT_COMMAND_IDS = new Set([
 
 let idCounter = 0;
 
-/** A reasonably unique object ID for newly created export areas / outputs. */
-export function newExportId(prefix: "export-area" | "output"): string {
+/** A reasonably unique object ID for newly created areas / outputs. */
+export function newExportId(prefix: "area" | "output"): string {
   idCounter += 1;
   return `${prefix}-${Date.now().toString(36)}-${idCounter.toString(36)}`;
 }
 
-/** Default bounds for a fresh export area when the caller doesn't supply size. */
-export const DEFAULT_EXPORT_AREA_SIZE = { width: 512, height: 512 } as const;
+/** Default bounds for a fresh area when the caller doesn't supply size. */
+export const DEFAULT_AREA_SIZE = { width: 512, height: 512 } as const;
 
 /**
  * Fill in the IDs and target an export command needs. Returns the parameters to
- * send plus the ID of any export area the command creates, so the caller can
+ * send plus the ID of any area the command creates, so the caller can
  * select it afterwards. `selectedOutputId` is the area's primary output, used as
  * the default target for output-scoped commands invoked without an explicit one.
  */
@@ -64,20 +64,20 @@ export function resolveExportParams(
   // Area-scoped commands (everything but create + the output.* family that takes
   // its own ids) act on an existing area; default it to the current selection.
   const areaScoped =
-    commandId === "export_area.rename" ||
-    commandId === "export_area.move" ||
-    commandId === "export_area.resize" ||
-    commandId === "export_area.set_padding" ||
-    commandId === "export_area.set_background" ||
-    commandId === "export_area.duplicate" ||
-    commandId === "export_area.delete" ||
-    commandId === "export_area.set_tags" ||
-    commandId === "export_area.attach_output" ||
-    commandId === "export_area.detach_output";
+    commandId === "area.rename" ||
+    commandId === "area.move" ||
+    commandId === "area.resize" ||
+    commandId === "area.set_padding" ||
+    commandId === "area.set_background" ||
+    commandId === "area.duplicate" ||
+    commandId === "area.delete" ||
+    commandId === "area.set_tags" ||
+    commandId === "area.attach_output" ||
+    commandId === "area.detach_output";
   if (areaScoped && p.id == null && p.area_id == null && selectedAreaId) {
     // create/rename/move/resize/duplicate/delete/set_tags key the area as `id`;
     // attach/detach key it as `area_id`.
-    if (commandId === "export_area.attach_output" || commandId === "export_area.detach_output") {
+    if (commandId === "area.attach_output" || commandId === "area.detach_output") {
       p.area_id = selectedAreaId;
     } else {
       p.id = selectedAreaId;
@@ -91,16 +91,16 @@ export function resolveExportParams(
   if (outputScoped && p.id == null && selectedOutputId) p.id = selectedOutputId;
 
   switch (commandId) {
-    case "export_area.create": {
-      if (p.id == null) p.id = newExportId("export-area");
-      if (p.name == null) p.name = "Export area";
-      if (p.width == null) p.width = DEFAULT_EXPORT_AREA_SIZE.width;
-      if (p.height == null) p.height = DEFAULT_EXPORT_AREA_SIZE.height;
+    case "area.create": {
+      if (p.id == null) p.id = newExportId("area");
+      if (p.name == null) p.name = "Area";
+      if (p.width == null) p.width = DEFAULT_AREA_SIZE.width;
+      if (p.height == null) p.height = DEFAULT_AREA_SIZE.height;
       createdAreaId = p.id as string;
       break;
     }
-    case "export_area.duplicate": {
-      if (p.new_id == null) p.new_id = newExportId("export-area");
+    case "area.duplicate": {
+      if (p.new_id == null) p.new_id = newExportId("area");
       createdAreaId = p.new_id as string;
       break;
     }

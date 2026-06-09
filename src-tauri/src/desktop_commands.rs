@@ -3,10 +3,10 @@ use base64::{engine::general_purpose, Engine as _};
 use fleck_core::command::{
     default_command_registry, CommandEngine, CommandId, CommandInvocation, CommandParameters,
 };
-use fleck_core::export::{preview_export_area, ExportWarning, OutputScale};
+use fleck_core::export::{preview_area, ExportWarning, OutputScale};
 use fleck_core::image_import;
 use fleck_core::model::{
-    AssetSource, ExportArea, ExportBackground, HistoryState, ImageObject, JsonValue, Layer,
+    AssetSource, Area, ExportBackground, HistoryState, ImageObject, JsonValue, Layer,
     ObjectId, OutputFormat, Padding, Rect, SelectionKind, TransparencyBehavior, Workspace,
 };
 use fleck_core::persistence::{
@@ -40,7 +40,7 @@ pub const REGISTERED_TAURI_COMMANDS: &[&str] = &[
     "get_workspace_meta",
     "get_layers",
     "get_image_objects",
-    "get_export_areas",
+    "get_areas",
     "get_history",
     "get_commands",
     "new_workspace",
@@ -57,8 +57,8 @@ pub const REGISTERED_TAURI_COMMANDS: &[&str] = &[
     "relink_asset",
     "get_render_model",
     "get_viewport_focus",
-    "create_export_area",
-    "export_area",
+    "create_area",
+    "area",
     "export_all",
     "reveal_exported_file",
     "copy_export_result",
@@ -144,7 +144,7 @@ pub struct ImageObjectDto {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExportAreaDto {
+pub struct AreaDto {
     id: String,
     name: String,
     bounds: RectDto,
@@ -286,7 +286,7 @@ pub struct RenderModelDto {
     has_document: bool,
     canvas: CanvasDto,
     layers: Vec<RenderLayerDto>,
-    export_areas: Vec<RenderExportAreaDto>,
+    areas: Vec<RenderAreaDto>,
     guides: Vec<RenderGuideDto>,
     selections: Vec<RenderSelectionDto>,
 }
@@ -337,7 +337,7 @@ pub struct RenderLayerDto {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct RenderExportAreaDto {
+pub struct RenderAreaDto {
     id: String,
     name: String,
     rect: RectDto,
@@ -411,16 +411,16 @@ pub fn get_image_objects(
 }
 
 #[tauri::command]
-pub fn get_export_areas(
+pub fn get_areas(
     state: tauri::State<'_, DesktopState>,
-) -> Result<Vec<ExportAreaDto>, String> {
+) -> Result<Vec<AreaDto>, String> {
     with_document(&state, |document| {
         Ok(document
             .package
             .workspace
-            .export_areas
+            .areas
             .iter()
-            .map(|area| export_area_dto(&document.package.workspace, area))
+            .map(|area| area_dto(&document.package.workspace, area))
             .collect())
     })
 }
@@ -667,7 +667,7 @@ pub fn get_viewport_focus(
                 .selections
                 .first()
                 .map(|selection| selection.bounds),
-            "export-area" => workspace.export_areas.first().map(|area| area.bounds),
+            "area" => workspace.areas.first().map(|area| area.bounds),
             _ => Some(default_canvas_rect(workspace)),
         };
         Ok(rect.map(|rect| {
@@ -681,10 +681,10 @@ pub fn get_viewport_focus(
 }
 
 #[tauri::command]
-pub fn create_export_area(state: tauri::State<'_, DesktopState>) -> Result<(), String> {
+pub fn create_area(state: tauri::State<'_, DesktopState>) -> Result<(), String> {
     let mut document = state.inner.lock().map_err(|_| "document lock poisoned")?;
     let workspace = &mut document.package.workspace;
-    let id = generated_id("export-area");
+    let id = generated_id("area");
     let output_id = generated_id("output");
     workspace.outputs.push(fleck_core::model::OutputDefinition {
         id: output_id.clone(),
@@ -700,7 +700,7 @@ pub fn create_export_area(state: tauri::State<'_, DesktopState>) -> Result<(), S
         transparency: fleck_core::model::TransparencyBehavior::Preserve,
         metadata: fleck_core::model::MetadataBehavior::Strip,
     });
-    workspace.export_areas.push(ExportArea {
+    workspace.areas.push(Area {
         id,
         name: "export".to_owned(),
         bounds: default_canvas_rect(workspace),
@@ -718,7 +718,7 @@ pub fn create_export_area(state: tauri::State<'_, DesktopState>) -> Result<(), S
 }
 
 #[tauri::command]
-pub fn export_area(
+pub fn area(
     state: tauri::State<'_, DesktopState>,
     id: String,
 ) -> Result<ExportResultDto, String> {
@@ -726,15 +726,15 @@ pub fn export_area(
     let workspace = &document.package.workspace;
     let id = ObjectId::new(id).map_err(|error| error.to_string())?;
     let scope = workspace
-        .export_areas
+        .areas
         .iter()
         .find(|area| area.id == id)
         .map(|area| area.name.clone())
-        .unwrap_or_else(|| "Export area".to_owned());
-    let warnings = preview_export_area(workspace, &id)
+        .unwrap_or_else(|| "Area".to_owned());
+    let warnings = preview_area(workspace, &id)
         .map(|preview| preview.warnings.iter().map(export_warning_label).collect())
         .unwrap_or_default();
-    match SkiaViewportRenderer::new().export_area(workspace, &id) {
+    match SkiaViewportRenderer::new().area(workspace, &id) {
         Ok(encoded) => {
             document.last_export = encoded.clone();
             Ok(export_result_dto(scope, encoded, warnings))
@@ -1071,10 +1071,10 @@ fn image_object_dto(workspace: &Workspace, object: &ImageObject) -> ImageObjectD
     }
 }
 
-fn export_area_dto(workspace: &Workspace, area: &ExportArea) -> ExportAreaDto {
+fn area_dto(workspace: &Workspace, area: &Area) -> AreaDto {
     // Source warnings + per-output preview dimensions from core preview metadata
     // so the UI consumes the same numbers/warnings the export pipeline would.
-    let preview = preview_export_area(workspace, &area.id).ok();
+    let preview = preview_area(workspace, &area.id).ok();
     let definition_of = |output_id: &str| {
         workspace
             .outputs
@@ -1127,7 +1127,7 @@ fn export_area_dto(workspace: &Workspace, area: &ExportArea) -> ExportAreaDto {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    ExportAreaDto {
+    AreaDto {
         id: area.id.as_str().to_owned(),
         name: area.name.clone(),
         bounds: rect_dto(area.bounds),
@@ -1352,10 +1352,10 @@ fn render_model(package: &WorkspacePackage, has_document: bool) -> RenderModelDt
                     }),
             )
             .collect(),
-        export_areas: workspace
-            .export_areas
+        areas: workspace
+            .areas
             .iter()
-            .map(|area| RenderExportAreaDto {
+            .map(|area| RenderAreaDto {
                 id: area.id.as_str().to_owned(),
                 name: area.name.clone(),
                 rect: rect_dto(area.bounds),

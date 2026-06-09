@@ -1,4 +1,4 @@
-use crate::export::{self, NewExportArea};
+use crate::export::{self, NewArea};
 use crate::layer::{self, NewLayer};
 use crate::model::{
     ExportBackground, ObjectId, Padding, Point, Rect, RgbaColor, Selection, SelectionKind,
@@ -159,16 +159,16 @@ pub fn layer_from_selection(
     Ok(())
 }
 
-pub fn export_area_from_selection(
+pub fn area_from_selection(
     workspace: &mut Workspace,
     selection_id: &ObjectId,
     area_id: ObjectId,
     name: String,
 ) -> SelectionResult<()> {
     let selection = require_selection(workspace, selection_id)?.clone();
-    export::create_export_area(
+    export::create_area(
         workspace,
-        NewExportArea {
+        NewArea {
             id: area_id,
             name,
             bounds: selection.bounds,
@@ -490,7 +490,7 @@ mod tests {
             "From Selection".to_owned(),
         )
         .expect("layer");
-        export_area_from_selection(
+        area_from_selection(
             &mut workspace,
             &id("selection"),
             id("area"),
@@ -501,11 +501,11 @@ mod tests {
         assert_eq!(workspace.layers[1].position, Point { x: 10.0, y: 12.0 });
         assert_eq!(workspace.layers[1].bounds.width, 20.0);
         assert_eq!(
-            workspace.export_areas[0].bounds,
+            workspace.areas[0].bounds,
             rect(10.0, 12.0, 20.0, 24.0)
         );
         assert_eq!(
-            workspace.export_areas[0].included_layer_ids,
+            workspace.areas[0].included_layer_ids,
             vec![id("base")]
         );
     }

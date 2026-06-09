@@ -40,7 +40,7 @@ pub struct Workspace {
     pub image_objects: Vec<ImageObject>,
     pub selections: Vec<Selection>,
     pub guides: Vec<Guide>,
-    pub export_areas: Vec<ExportArea>,
+    pub areas: Vec<Area>,
     pub outputs: Vec<OutputDefinition>,
     pub recipes: Vec<Recipe>,
     pub assets: Vec<Asset>,
@@ -60,7 +60,7 @@ impl Workspace {
             image_objects: Vec::new(),
             selections: Vec::new(),
             guides: Vec::new(),
-            export_areas: Vec::new(),
+            areas: Vec::new(),
             outputs: Vec::new(),
             recipes: Vec::new(),
             assets: Vec::new(),
@@ -101,8 +101,8 @@ impl Workspace {
         );
         collect_duplicate_ids(
             &mut issues,
-            "export_area",
-            self.export_areas.iter().map(|area| &area.id),
+            "area",
+            self.areas.iter().map(|area| &area.id),
         );
         collect_duplicate_ids(
             &mut issues,
@@ -187,36 +187,36 @@ impl Workspace {
             );
         }
 
-        for export_area in &self.export_areas {
-            if export_area.bounds.width <= 0.0 || export_area.bounds.height <= 0.0 {
+        for area in &self.areas {
+            if area.bounds.width <= 0.0 || area.bounds.height <= 0.0 {
                 issues.push(ValidationIssue::NonPositiveBounds {
-                    object_kind: "export_area",
-                    id: export_area.id.clone(),
+                    object_kind: "area",
+                    id: area.id.clone(),
                 });
             }
-            for output_id in &export_area.output_ids {
+            for output_id in &area.output_ids {
                 require_reference(
                     &mut issues,
-                    "export_area.output_ids",
-                    &export_area.id,
+                    "area.output_ids",
+                    &area.id,
                     output_id,
                     &output_ids,
                 );
             }
-            for layer_id in &export_area.included_layer_ids {
+            for layer_id in &area.included_layer_ids {
                 require_reference(
                     &mut issues,
-                    "export_area.included_layer_ids",
-                    &export_area.id,
+                    "area.included_layer_ids",
+                    &area.id,
                     layer_id,
                     &layer_ids,
                 );
             }
-            for layer_id in &export_area.excluded_layer_ids {
+            for layer_id in &area.excluded_layer_ids {
                 require_reference(
                     &mut issues,
-                    "export_area.excluded_layer_ids",
-                    &export_area.id,
+                    "area.excluded_layer_ids",
+                    &area.id,
                     layer_id,
                     &layer_ids,
                 );
@@ -378,7 +378,7 @@ pub struct Guide {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ExportArea {
+pub struct Area {
     pub id: ObjectId,
     pub name: String,
     pub bounds: Rect,
@@ -714,7 +714,7 @@ pub enum RecipeTarget {
     Layer,
     ImageObject,
     Selection,
-    ExportArea,
+    Area,
     Workspace,
 }
 
@@ -1011,7 +1011,7 @@ mod tests {
             transparency: TransparencyBehavior::Preserve,
             metadata: MetadataBehavior::Strip,
         });
-        workspace.export_areas.push(ExportArea {
+        workspace.areas.push(Area {
             id: id("export-logo"),
             name: "logo".to_owned(),
             bounds: rect(0.0, 0.0, 64.0, 64.0),
@@ -1027,7 +1027,7 @@ mod tests {
         workspace.recipes.push(Recipe {
             id: id("recipe-favicon"),
             name: "Favicon".to_owned(),
-            target: RecipeTarget::ExportArea,
+            target: RecipeTarget::Area,
             steps: vec![RecipeStep {
                 command_id: "export.area".to_owned(),
                 parameters_json: JsonValue::Object(Default::default()),

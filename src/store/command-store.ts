@@ -12,7 +12,7 @@ import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/lib/queries";
 import { LAYER_COMMAND_IDS, resolveLayerParams } from "@/lib/layer-commands";
 import { IMAGE_COMMAND_IDS, resolveImageParams } from "@/lib/image-commands";
-import { EXPORT_COMMAND_IDS, resolveExportParams } from "@/lib/export-commands";
+import { EXPORT_COMMAND_IDS, resolveExportParams } from "@/lib/area-commands";
 import {
   SELECTION_COMMAND_IDS,
   SELECTION_CREATE_IDS,
@@ -41,7 +41,7 @@ function invalidateAfterCommand() {
   queryClient.invalidateQueries({ queryKey: queryKeys.workspaceMeta });
   queryClient.invalidateQueries({ queryKey: queryKeys.layers });
   queryClient.invalidateQueries({ queryKey: queryKeys.imageObjects });
-  queryClient.invalidateQueries({ queryKey: queryKeys.exportAreas });
+  queryClient.invalidateQueries({ queryKey: queryKeys.areas });
   queryClient.invalidateQueries({ queryKey: queryKeys.renderModel });
 }
 
@@ -51,7 +51,7 @@ export const useCommandStore = create<CommandState>((set, get) => ({
 
   execute: async (id, parameters = {}) => {
     // UI-only commands are performed on the frontend (no core mutation). The
-    // export preview dialog targets the currently selected export area.
+    // export preview dialog targets the currently selected area.
     if (id === "export.preview") {
       useUIStore.getState().setExportPreviewOpen(true);
       return;
@@ -59,7 +59,7 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     // Export actions call the backend export jobs directly (they are not core
     // commands and don't run through the engine/history).
     if (id === "export.area-selected") {
-      const areaId = useUIStore.getState().selectedExportAreaId;
+      const areaId = useUIStore.getState().selectedAreaId;
       if (areaId) await api.exportArea(areaId);
       return;
     }
@@ -74,7 +74,7 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     let runParams = parameters;
     let createdLayerId: string | null = null;
     let createdImageObjectId: string | null = null;
-    let createdExportAreaId: string | null = null;
+    let createdAreaId: string | null = null;
     let createdSelectionId: string | null = null;
     let clearActiveSelection = false;
     if (LAYER_COMMAND_IDS.has(id)) {
@@ -88,15 +88,15 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     } else if (EXPORT_COMMAND_IDS.has(id)) {
       // Output-scoped commands always carry an explicit output id from the UI, so
       // the area's primary output default isn't needed here (passed as null).
-      const resolved = resolveExportParams(id, parameters, useUIStore.getState().selectedExportAreaId, null);
+      const resolved = resolveExportParams(id, parameters, useUIStore.getState().selectedAreaId, null);
       runParams = resolved.parameters;
-      createdExportAreaId = resolved.createdAreaId;
+      createdAreaId = resolved.createdAreaId;
     } else if (SELECTION_COMMAND_IDS.has(id)) {
       const resolved = resolveSelectionParams(id, parameters, useUIStore.getState().activeSelectionId);
       runParams = resolved.parameters;
       createdSelectionId = resolved.createdSelectionId;
       createdLayerId = resolved.createdLayerId;
-      createdExportAreaId = resolved.createdExportAreaId;
+      createdAreaId = resolved.createdAreaId;
       clearActiveSelection = resolved.removesSelection;
     }
 
@@ -120,8 +120,8 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     // Keep focus on whatever the command just created so the inspector follows.
     if (createdLayerId) useUIStore.getState().setSelectedLayerId(createdLayerId);
     if (createdImageObjectId) useUIStore.getState().setSelectedImageObjectId(createdImageObjectId);
-    if (createdExportAreaId) {
-      useUIStore.getState().setSelectedExportAreaId(createdExportAreaId);
+    if (createdAreaId) {
+      useUIStore.getState().setSelectedAreaId(createdAreaId);
       useUIStore.getState().setSideTab("exports");
     }
     if (createdSelectionId) useUIStore.getState().setActiveSelectionId(createdSelectionId);

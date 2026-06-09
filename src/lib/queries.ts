@@ -12,7 +12,7 @@ export const queryKeys = {
   workspaceMeta: ["workspace", "meta"] as const,
   layers: ["document", "layers"] as const,
   imageObjects: ["document", "image-objects"] as const,
-  exportAreas: ["document", "export-areas"] as const,
+  areas: ["document", "areas"] as const,
   history: ["document", "history"] as const,
   recentFiles: ["workspace", "recent-files"] as const,
   commands: ["commands", "definitions"] as const,
@@ -32,8 +32,8 @@ export function useImageObjects() {
   return useQuery({ queryKey: queryKeys.imageObjects, queryFn: api.getImageObjects });
 }
 
-export function useExportAreas() {
-  return useQuery({ queryKey: queryKeys.exportAreas, queryFn: api.getExportAreas });
+export function useAreas() {
+  return useQuery({ queryKey: queryKeys.areas, queryFn: api.getAreas });
 }
 
 export function useHistory() {

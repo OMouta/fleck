@@ -7,7 +7,7 @@
  * in history). This module owns the frontend-only concerns:
  *
  *  1. Generating the stable object IDs the core requires for created selections,
- *     layers (`layer_from_selection`), and export areas (`export_area_from_selection`).
+ *     layers (`layer_from_selection`), and areas (`area_from_selection`).
  *  2. Defaulting the target `id` to the active selection when callers (palette,
  *     keyboard shortcuts, menus) don't pass an explicit one.
  *
@@ -31,7 +31,7 @@ export const SELECTION_COMMAND_IDS = new Set([
   "selection.delete",
   "selection.copy",
   "selection.layer_from_selection",
-  "selection.export_area_from_selection",
+  "selection.area_from_selection",
   "selection.direct_export",
 ]);
 
@@ -67,8 +67,8 @@ export type SelectionResolution = {
   createdSelectionId: string | null;
   /** ID of any layer created (selection.layer_from_selection). */
   createdLayerId: string | null;
-  /** ID of any export area created (selection.export_area_from_selection). */
-  createdExportAreaId: string | null;
+  /** ID of any area created (selection.area_from_selection). */
+  createdAreaId: string | null;
   /** True when the command deletes the selection mask. */
   removesSelection: boolean;
 };
@@ -85,7 +85,7 @@ export function resolveSelectionParams(
   const p: Record<string, unknown> = { ...parameters };
   let createdSelectionId: string | null = null;
   let createdLayerId: string | null = null;
-  let createdExportAreaId: string | null = null;
+  let createdAreaId: string | null = null;
 
   if (SELECTION_CREATE_IDS.has(commandId)) {
     if (p.id == null) p.id = newSelectionId();
@@ -98,17 +98,17 @@ export function resolveSelectionParams(
     if (p.layer_id == null) p.layer_id = newSelectionChildId("layer");
     if (p.name == null) p.name = "Selection layer";
     createdLayerId = p.layer_id as string;
-  } else if (commandId === "selection.export_area_from_selection") {
+  } else if (commandId === "selection.area_from_selection") {
     if (p.area_id == null) p.area_id = newSelectionChildId("area");
     if (p.name == null) p.name = "Selection area";
-    createdExportAreaId = p.area_id as string;
+    createdAreaId = p.area_id as string;
   }
 
   return {
     parameters: p,
     createdSelectionId,
     createdLayerId,
-    createdExportAreaId,
+    createdAreaId,
     removesSelection: commandId === "selection.delete",
   };
 }

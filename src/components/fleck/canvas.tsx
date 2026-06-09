@@ -19,7 +19,7 @@ import type { Point, Rect } from "@/lib/fleck-data";
 import { cn } from "@/lib/utils";
 import { openImageFlow, dropImageFlow } from "@/lib/image-import";
 import { screenToWorkspace, workspaceToScreen } from "@/lib/viewport";
-import { DEFAULT_EXPORT_AREA_SIZE } from "@/lib/export-commands";
+import { DEFAULT_AREA_SIZE } from "@/lib/area-commands";
 import { SELECTION_NUDGE, SELECTION_NUDGE_LARGE } from "@/lib/selection-commands";
 import { useUIStore } from "@/store/ui-store";
 import { useViewportStore } from "@/store/viewport-store";
@@ -35,7 +35,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 
-type ExportAreaDrag = {
+type AreaDrag = {
   id: string;
   pointerId: number;
   startScreen: Point;
@@ -82,8 +82,8 @@ export function Canvas() {
   const activeTool = useUIStore((s) => s.activeTool);
   const marqueeShape = useUIStore((s) => s.marqueeShape);
   const lassoMode = useUIStore((s) => s.lassoMode);
-  const selectedExportAreaId = useUIStore((s) => s.selectedExportAreaId);
-  const setSelectedExportAreaId = useUIStore((s) => s.setSelectedExportAreaId);
+  const selectedAreaId = useUIStore((s) => s.selectedAreaId);
+  const setSelectedAreaId = useUIStore((s) => s.setSelectedAreaId);
   const setSideTab = useUIStore((s) => s.setSideTab);
   const activeSelectionId = useUIStore((s) => s.activeSelectionId);
   const setActiveSelectionId = useUIStore((s) => s.setActiveSelectionId);
@@ -91,9 +91,9 @@ export function Canvas() {
   const newWorkspace = useWorkspaceFilesStore((s) => s.newWorkspace);
   const [dragOver, setDragOver] = useState(false);
   const [assetPaintVersion, setAssetPaintVersion] = useState(0);
-  const [areaDrag, setAreaDrag] = useState<ExportAreaDrag | null>(null);
+  const [areaDrag, setAreaDrag] = useState<AreaDrag | null>(null);
   const [selectionDraft, setSelectionDraft] = useState<SelectionDraft | null>(null);
-  // Workspace point of the last right-click, used to place a new export area there.
+  // Workspace point of the last right-click, used to place a new area there.
   const menuPointRef = useRef<Point>({ x: 0, y: 0 });
   const [menuAreaId, setMenuAreaId] = useState<string | null>(null);
 
@@ -115,7 +115,7 @@ export function Canvas() {
   const isEmpty =
     !model ||
     !model.hasDocument ||
-    (model.canvas.width <= 0 && model.layers.length === 0 && model.exportAreas.length === 0);
+    (model.canvas.width <= 0 && model.layers.length === 0 && model.areas.length === 0);
 
   const [spaceHeld, setSpaceHeld] = useState(false);
 
@@ -148,7 +148,7 @@ export function Canvas() {
     model && areaDrag
       ? {
           ...model,
-          exportAreas: model.exportAreas.map((area) =>
+          areas: model.areas.map((area) =>
             area.id === areaDrag.id ? { ...area, rect: areaDrag.currentRect } : area,
           ),
         }
@@ -167,12 +167,12 @@ export function Canvas() {
         overlays,
         palette: paletteRef.current ?? readPalette(),
         dpr: dprRef.current,
-        selectedExportAreaId,
+        selectedAreaId,
         onAssetsChanged: () => setAssetPaintVersion((v) => v + 1),
       });
     });
     return () => cancelAnimationFrame(raf);
-  }, [paintModel, origin, zoom, screen, overlays, selectedExportAreaId, assetPaintVersion]);
+  }, [paintModel, origin, zoom, screen, overlays, selectedAreaId, assetPaintVersion]);
 
   // Focus the canvas on mount so it's the default editor focus.
   useEffect(() => {
@@ -202,12 +202,12 @@ export function Canvas() {
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
 
-  /** Topmost export area (in workspace coords) under a screen point, if any. */
+  /** Topmost area (in workspace coords) under a screen point, if any. */
   const areaAtScreen = (screenPt: Point): { id: string; rect: Rect } | null => {
     if (!model) return null;
     const w = screenToWorkspace({ origin, zoom, screen }, screenPt);
-    for (let i = model.exportAreas.length - 1; i >= 0; i--) {
-      const a = model.exportAreas[i];
+    for (let i = model.areas.length - 1; i >= 0; i--) {
+      const a = model.areas[i];
       if (w.x >= a.rect.x && w.x <= a.rect.x + a.rect.width && w.y >= a.rect.y && w.y <= a.rect.y + a.rect.height) {
         return a;
       }
@@ -216,7 +216,7 @@ export function Canvas() {
   };
 
   const selectArea = (id: string) => {
-    setSelectedExportAreaId(id);
+    setSelectedAreaId(id);
     setSideTab("exports");
   };
 
@@ -226,15 +226,15 @@ export function Canvas() {
     (e.target as Element).setPointerCapture(e.pointerId);
   };
 
-  /** Create a default-sized export area centred on a screen point. */
+  /** Create a default-sized area centred on a screen point. */
   const createAreaAt = (screenPt: Point) => {
     const w = screenToWorkspace({ origin, zoom, screen }, screenPt);
-    execute("export_area.create", {
-      name: "Export area",
-      x: Math.round(w.x - DEFAULT_EXPORT_AREA_SIZE.width / 2),
-      y: Math.round(w.y - DEFAULT_EXPORT_AREA_SIZE.height / 2),
-      width: DEFAULT_EXPORT_AREA_SIZE.width,
-      height: DEFAULT_EXPORT_AREA_SIZE.height,
+    execute("area.create", {
+      name: "Area",
+      x: Math.round(w.x - DEFAULT_AREA_SIZE.width / 2),
+      y: Math.round(w.y - DEFAULT_AREA_SIZE.height / 2),
+      width: DEFAULT_AREA_SIZE.width,
+      height: DEFAULT_AREA_SIZE.height,
     });
   };
 
@@ -304,10 +304,10 @@ export function Canvas() {
       zoomAt(pointerPos(e), e.altKey ? 1 / 1.6 : 1.6);
       return;
     }
-    // Export-area interaction is scoped to the export-area tool so clicks with
+    // Export-area interaction is scoped to the area tool so clicks with
     // other tools don't hijack selection: clicking an existing area selects it
     // (synced to the panel + inspector), empty space marks a new region.
-    if (activeTool === "export-area") {
+    if (activeTool === "area") {
       const hit = areaAtScreen(pointerPos(e));
       if (hit) {
         selectArea(hit.id);
@@ -347,7 +347,7 @@ export function Canvas() {
     menuPointRef.current = pt;
     const hit = areaAtScreen(pt);
     setMenuAreaId(hit?.id ?? null);
-    if (hit) setSelectedExportAreaId(hit.id);
+    if (hit) setSelectedAreaId(hit.id);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -391,7 +391,7 @@ export function Canvas() {
         Math.round(areaDrag.currentRect.x) !== Math.round(areaDrag.startRect.x) ||
         Math.round(areaDrag.currentRect.y) !== Math.round(areaDrag.startRect.y);
       if (moved) {
-        execute("export_area.move", {
+        execute("area.move", {
           id: areaDrag.id,
           x: Math.round(areaDrag.currentRect.x),
           y: Math.round(areaDrag.currentRect.y),
@@ -604,7 +604,7 @@ export function Canvas() {
         <OverlayToggle active={overlays.transformHandles} label="Transform handles" onClick={() => toggleOverlay("transformHandles")}>
           <Move className="size-4" />
         </OverlayToggle>
-        <OverlayToggle active={overlays.exportAreas} label="Export areas" onClick={() => toggleOverlay("exportAreas")}>
+        <OverlayToggle active={overlays.areas} label="Areas" onClick={() => toggleOverlay("areas")}>
           <Frame className="size-4" />
         </OverlayToggle>
       </div>
@@ -643,7 +643,7 @@ export function Canvas() {
         <ControlButton label="Zoom to selection" onClick={() => focus("selection")}>
           <SquareDashed className="size-4" />
         </ControlButton>
-        <ControlButton label="Zoom to export area" onClick={() => focus("export-area", selectedExportAreaId)}>
+        <ControlButton label="Zoom to area" onClick={() => focus("area", selectedAreaId)}>
           <Frame className="size-4" />
         </ControlButton>
       </div>
@@ -652,7 +652,7 @@ export function Canvas() {
       <ContextMenuContent>
         <ContextMenuItem onSelect={() => createAreaAt(menuPointRef.current)}>
           <Frame />
-          New export area here
+          New area here
         </ContextMenuItem>
         <ContextMenuItem onSelect={() => api.exportAll()}>
           <FilePlus2 />
@@ -670,13 +670,13 @@ export function Canvas() {
             <ContextMenuItem
               onSelect={() => {
                 selectArea(menuAreaId);
-                focus("export-area", menuAreaId);
+                focus("area", menuAreaId);
               }}
             >
               <Maximize2 />
               Zoom to area
             </ContextMenuItem>
-            <ContextMenuItem onSelect={() => execute("export_area.duplicate", { id: menuAreaId })}>
+            <ContextMenuItem onSelect={() => execute("area.duplicate", { id: menuAreaId })}>
               <Copy />
               Duplicate area
             </ContextMenuItem>
@@ -684,8 +684,8 @@ export function Canvas() {
             <ContextMenuItem
               variant="destructive"
               onSelect={() => {
-                execute("export_area.delete", { id: menuAreaId });
-                if (selectedExportAreaId === menuAreaId) setSelectedExportAreaId(null);
+                execute("area.delete", { id: menuAreaId });
+                if (selectedAreaId === menuAreaId) setSelectedAreaId(null);
               }}
             >
               <Trash2 />

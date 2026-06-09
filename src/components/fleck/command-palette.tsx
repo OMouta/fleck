@@ -76,7 +76,7 @@ const COMMAND_ICON: Record<string, LucideIcon> = {
   "edit.resize-canvas": Maximize,
   "edit.brightness-contrast": Palette,
   "view.toggle-pixel-grid": Grid3x3,
-  "view.zoom-export-area": Frame,
+  "view.zoom-area": Frame,
   "recipe.favicon": Grid3x3,
   "recipe.app-icon": FileStack,
 };
@@ -95,7 +95,7 @@ export function CommandPalette() {
   const selectedLayerId = useUIStore((s) => s.selectedLayerId);
   const selectedImageObjectId = useUIStore((s) => s.selectedImageObjectId);
   const sideTab = useUIStore((s) => s.sideTab);
-  const selectedExportAreaId = useUIStore((s) => s.selectedExportAreaId);
+  const selectedAreaId = useUIStore((s) => s.selectedAreaId);
 
   const recentIds = useCommandStore((s) => s.recentCommandIds);
   const lastInvocation = useCommandStore((s) => s.lastInvocation);
@@ -119,10 +119,10 @@ export function CommandPalette() {
     return (group: CommandGroup): number => {
       if (group === "layer" && selectedLayerId) return 6;
       if (group === "image_object" && (selectedImageObjectId || sideTab === "images")) return 6;
-      if (group === "export" && (selectedExportAreaId || sideTab === "exports")) return 6;
+      if (group === "export" && (selectedAreaId || sideTab === "exports")) return 6;
       return 0;
     };
-  }, [selectedLayerId, selectedImageObjectId, selectedExportAreaId, sideTab]);
+  }, [selectedLayerId, selectedImageObjectId, selectedAreaId, sideTab]);
 
   const byId = useMemo(() => new Map(commands.map((c) => [c.id, c])), [commands]);
   const lastDef = lastInvocation ? byId.get(lastInvocation.id) : undefined;

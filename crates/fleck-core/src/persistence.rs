@@ -425,7 +425,7 @@ mod tests {
             image_objects: Vec::new(),
             selections: Vec::new(),
             guides: Vec::new(),
-            export_areas: Vec::new(),
+            areas: Vec::new(),
             outputs: Vec::new(),
             recipes: Vec::new(),
             assets: vec![Asset {

@@ -1,4 +1,4 @@
-use crate::model::{Axis, ExportArea, Guide, Layer, Point, Rect, Size, Workspace};
+use crate::model::{Axis, Area, Guide, Layer, Point, Rect, Size, Workspace};
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_MIN_PIXEL_GRID_ZOOM: f32 = 8.0;
@@ -127,7 +127,7 @@ pub struct SnapSettings {
     pub threshold: f32,
     pub pixels: bool,
     pub layer_bounds: bool,
-    pub export_area_bounds: bool,
+    pub area_bounds: bool,
     pub centers: bool,
     pub edges: bool,
     pub guides: bool,
@@ -141,7 +141,7 @@ impl Default for SnapSettings {
             threshold: 0.5,
             pixels: true,
             layer_bounds: true,
-            export_area_bounds: true,
+            area_bounds: true,
             centers: true,
             edges: true,
             guides: true,
@@ -198,7 +198,7 @@ pub struct SnapHit {
 pub enum SnapTarget {
     Pixel,
     LayerBounds,
-    ExportAreaBounds,
+    AreaBounds,
     Center,
     Edge,
     Guide,
@@ -310,7 +310,7 @@ pub struct OverlaySettings {
     pub pixel_grid: PixelGridSettings,
     pub selections: bool,
     pub transform_handles: bool,
-    pub export_areas: bool,
+    pub areas: bool,
 }
 
 impl Default for OverlaySettings {
@@ -321,7 +321,7 @@ impl Default for OverlaySettings {
             pixel_grid: PixelGridSettings::default(),
             selections: true,
             transform_handles: true,
-            export_areas: true,
+            areas: true,
         }
     }
 }
@@ -401,9 +401,9 @@ fn snap_candidates_for_axis(
         }
     }
 
-    if settings.export_area_bounds || settings.centers || settings.edges {
-        for export_area in &workspace.export_areas {
-            candidates.extend(export_area_snap_candidates(export_area, axis, settings));
+    if settings.area_bounds || settings.centers || settings.edges {
+        for area in &workspace.areas {
+            candidates.extend(area_snap_candidates(area, axis, settings));
         }
     }
 
@@ -430,14 +430,14 @@ fn rect_snap_candidates(
     let bounds_target = if is_layer {
         SnapTarget::LayerBounds
     } else {
-        SnapTarget::ExportAreaBounds
+        SnapTarget::AreaBounds
     };
     let values = match axis {
         Axis::Vertical => (rect.x, rect.right(), rect.center_x()),
         Axis::Horizontal => (rect.y, rect.bottom(), rect.center_y()),
     };
 
-    if (is_layer && settings.layer_bounds) || (!is_layer && settings.export_area_bounds) {
+    if (is_layer && settings.layer_bounds) || (!is_layer && settings.area_bounds) {
         candidates.push(SnapHit {
             axis,
             target: bounds_target,
@@ -474,12 +474,12 @@ fn rect_snap_candidates(
     candidates
 }
 
-fn export_area_snap_candidates(
-    export_area: &ExportArea,
+fn area_snap_candidates(
+    area: &Area,
     axis: Axis,
     settings: &SnapSettings,
 ) -> Vec<SnapHit> {
-    rect_snap_candidates(export_area.bounds, axis, settings, false)
+    rect_snap_candidates(area.bounds, axis, settings, false)
 }
 
 fn guide_matches_axis(guide: &Guide, point_axis: Axis) -> bool {
@@ -539,7 +539,7 @@ fn nearest_snap(value: f32, candidates: &[SnapHit], threshold: f32) -> (f32, Vec
 fn target_priority(target: SnapTarget) -> u8 {
     match target {
         SnapTarget::Guide => 0,
-        SnapTarget::LayerBounds | SnapTarget::ExportAreaBounds => 1,
+        SnapTarget::LayerBounds | SnapTarget::AreaBounds => 1,
         SnapTarget::Center | SnapTarget::Edge => 2,
         SnapTarget::CommonSize => 3,
         SnapTarget::Pixel => 4,
@@ -657,7 +657,7 @@ mod tests {
     }
 
     #[test]
-    fn snap_point_targets_pixels_layers_export_areas_centers_edges_and_guides() {
+    fn snap_point_targets_pixels_layers_areas_centers_edges_and_guides() {
         let workspace = snapping_workspace();
         let settings = SnapSettings {
             threshold: 0.25,
@@ -680,7 +680,7 @@ mod tests {
         assert!(export
             .hits
             .iter()
-            .any(|hit| hit.target == SnapTarget::ExportAreaBounds));
+            .any(|hit| hit.target == SnapTarget::AreaBounds));
 
         let center = snap_workspace_point(&workspace, Point { x: 60.0, y: 45.0 }, &settings);
         assert!(center
@@ -763,7 +763,7 @@ mod tests {
             export_participation: ExportParticipation::Included,
             raster: None,
         });
-        workspace.export_areas.push(crate::model::ExportArea {
+        workspace.areas.push(crate::model::Area {
             id: id("export"),
             name: "Export".to_owned(),
             bounds: Rect {

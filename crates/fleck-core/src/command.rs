@@ -1,4 +1,4 @@
-use crate::export::{self, ExportError, NewExportArea, NewOutput, OutputUpdate};
+use crate::export::{self, ExportError, NewArea, NewOutput, OutputUpdate};
 use crate::image_import::{self, ImageImportError, ImagePlacement, LinkedImageImport};
 use crate::layer::{self, LayerError, NewLayer};
 use crate::model::{
@@ -140,7 +140,7 @@ impl CommandInvocation {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct CommandContext {
     pub selected_layer_id: Option<ObjectId>,
-    pub selected_export_area_id: Option<ObjectId>,
+    pub selected_area_id: Option<ObjectId>,
     pub active_selection_id: Option<ObjectId>,
 }
 
@@ -1297,26 +1297,26 @@ fn register_selection_commands(registry: &mut CommandRegistry) -> Result<(), Com
     )?;
     register_selection_command(
         registry,
-        "selection.export_area_from_selection",
-        "Export Area From Selection",
-        "Create an export area from selection bounds.",
-        &["create export area from selection"],
+        "selection.area_from_selection",
+        "Area From Selection",
+        "Create an area from selection bounds.",
+        &["create area from selection"],
         None,
         vec![
             prompt("id", "Selection ID", ParameterKind::ObjectId, true),
-            prompt("area_id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("area_id", "Area ID", ParameterKind::ObjectId, true),
             prompt("name", "Name", ParameterKind::String, true),
         ],
         true,
         |workspace, invocation, runtime| {
             runtime.ensure_not_cancelled()?;
-            selection::export_area_from_selection(
+            selection::area_from_selection(
                 workspace,
                 &required_object_id(&invocation.parameters, "id")?,
                 required_object_id(&invocation.parameters, "area_id")?,
                 invocation.parameters.required_string("name")?.to_owned(),
             )?;
-            Ok(CommandEffect::undoable("Create Export Area From Selection"))
+            Ok(CommandEffect::undoable("Create Area From Selection"))
         },
     )?;
     register_selection_command(
@@ -1601,13 +1601,13 @@ fn register_pixel_commands(registry: &mut CommandRegistry) -> Result<(), Command
 fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), CommandError> {
     register_export_command(
         registry,
-        "export_area.create",
-        "Create Export Area",
+        "area.create",
+        "Create Area",
         "Create a named export metadata region.",
-        &["new export area", "mark export area"],
+        &["new area", "mark area"],
         None,
         vec![
-            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("id", "Area ID", ParameterKind::ObjectId, true),
             prompt("name", "Name", ParameterKind::String, true),
             prompt("x", "X", ParameterKind::Number, false),
             prompt("y", "Y", ParameterKind::Number, false),
@@ -1618,7 +1618,7 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
             runtime.ensure_not_cancelled()?;
             let id = required_object_id(&invocation.parameters, "id")?;
             let name = invocation.parameters.required_string("name")?.to_owned();
-            let area = NewExportArea {
+            let area = NewArea {
                 id,
                 name: name.clone(),
                 bounds: Rect {
@@ -1636,42 +1636,42 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
                 tags: Vec::new(),
                 preset_id: None,
             };
-            export::create_export_area(workspace, area)?;
+            export::create_area(workspace, area)?;
             Ok(CommandEffect::undoable(format!(
-                "Create Export Area {name}"
+                "Create Area {name}"
             )))
         },
     )?;
     register_export_command(
         registry,
-        "export_area.rename",
-        "Rename Export Area",
-        "Rename an export area.",
-        &["name export area"],
+        "area.rename",
+        "Rename Area",
+        "Rename an area.",
+        &["name area"],
         Some("F2"),
         vec![
-            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("id", "Area ID", ParameterKind::ObjectId, true),
             prompt("name", "Name", ParameterKind::String, true),
         ],
         |workspace, invocation, runtime| {
             runtime.ensure_not_cancelled()?;
             let id = required_object_id(&invocation.parameters, "id")?;
             let name = invocation.parameters.required_string("name")?.to_owned();
-            export::rename_export_area(workspace, &id, name.clone())?;
+            export::rename_area(workspace, &id, name.clone())?;
             Ok(CommandEffect::undoable(format!(
-                "Rename Export Area to {name}"
+                "Rename Area to {name}"
             )))
         },
     )?;
     register_export_command(
         registry,
-        "export_area.move",
-        "Move Export Area",
-        "Move an export area.",
-        &["position export area"],
+        "area.move",
+        "Move Area",
+        "Move an area.",
+        &["position area"],
         None,
         vec![
-            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("id", "Area ID", ParameterKind::ObjectId, true),
             prompt("x", "X", ParameterKind::Number, true),
             prompt("y", "Y", ParameterKind::Number, true),
         ],
@@ -1680,43 +1680,43 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
             let id = required_object_id(&invocation.parameters, "id")?;
             let x = required_f32(&invocation.parameters, "x")?;
             let y = required_f32(&invocation.parameters, "y")?;
-            export::move_export_area(workspace, &id, x, y)?;
-            Ok(CommandEffect::undoable("Move Export Area"))
+            export::move_area(workspace, &id, x, y)?;
+            Ok(CommandEffect::undoable("Move Area"))
         },
     )?;
     register_export_command(
         registry,
-        "export_area.resize",
-        "Resize Export Area",
-        "Resize an export area.",
-        &["size export area"],
+        "area.resize",
+        "Resize Area",
+        "Resize an area.",
+        &["size area"],
         None,
         vec![
-            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("id", "Area ID", ParameterKind::ObjectId, true),
             prompt("width", "Width", ParameterKind::Number, true),
             prompt("height", "Height", ParameterKind::Number, true),
         ],
         |workspace, invocation, runtime| {
             runtime.ensure_not_cancelled()?;
             let id = required_object_id(&invocation.parameters, "id")?;
-            export::resize_export_area(
+            export::resize_area(
                 workspace,
                 &id,
                 required_f32(&invocation.parameters, "width")?,
                 required_f32(&invocation.parameters, "height")?,
             )?;
-            Ok(CommandEffect::undoable("Resize Export Area"))
+            Ok(CommandEffect::undoable("Resize Area"))
         },
     )?;
     register_export_command(
         registry,
-        "export_area.set_padding",
-        "Set Export Area Padding",
-        "Set export area padding.",
-        &["pad export area"],
+        "area.set_padding",
+        "Set Area Padding",
+        "Set area padding.",
+        &["pad area"],
         None,
         vec![
-            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("id", "Area ID", ParameterKind::ObjectId, true),
             prompt("top", "Top", ParameterKind::Number, true),
             prompt("right", "Right", ParameterKind::Number, true),
             prompt("bottom", "Bottom", ParameterKind::Number, true),
@@ -1725,7 +1725,7 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
         |workspace, invocation, runtime| {
             runtime.ensure_not_cancelled()?;
             let id = required_object_id(&invocation.parameters, "id")?;
-            export::set_export_area_padding(
+            export::set_area_padding(
                 workspace,
                 &id,
                 Padding {
@@ -1735,18 +1735,18 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
                     left: required_f32(&invocation.parameters, "left")?.max(0.0),
                 },
             )?;
-            Ok(CommandEffect::undoable("Set Export Area Padding"))
+            Ok(CommandEffect::undoable("Set Area Padding"))
         },
     )?;
     register_export_command(
         registry,
-        "export_area.set_background",
-        "Set Export Area Background",
-        "Set export area background.",
-        &["export area background"],
+        "area.set_background",
+        "Set Area Background",
+        "Set area background.",
+        &["area background"],
         None,
         vec![
-            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("id", "Area ID", ParameterKind::ObjectId, true),
             prompt("background", "Background", ParameterKind::String, true),
         ],
         |workspace, invocation, runtime| {
@@ -1754,22 +1754,22 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
             let id = required_object_id(&invocation.parameters, "id")?;
             let background =
                 parse_export_background(invocation.parameters.required_string("background")?)?;
-            export::set_export_area_background(workspace, &id, background)?;
-            Ok(CommandEffect::undoable("Set Export Area Background"))
+            export::set_area_background(workspace, &id, background)?;
+            Ok(CommandEffect::undoable("Set Area Background"))
         },
     )?;
     register_export_command(
         registry,
-        "export_area.duplicate",
-        "Duplicate Export Area",
-        "Duplicate an export area.",
-        &["copy export area"],
+        "area.duplicate",
+        "Duplicate Area",
+        "Duplicate an area.",
+        &["copy area"],
         Some("Ctrl+D"),
         vec![
-            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("id", "Area ID", ParameterKind::ObjectId, true),
             prompt(
                 "new_id",
-                "New Export Area ID",
+                "New Area ID",
                 ParameterKind::ObjectId,
                 true,
             ),
@@ -1778,19 +1778,19 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
             runtime.ensure_not_cancelled()?;
             let id = required_object_id(&invocation.parameters, "id")?;
             let new_id = required_object_id(&invocation.parameters, "new_id")?;
-            export::duplicate_export_area(workspace, &id, new_id)?;
-            Ok(CommandEffect::undoable("Duplicate Export Area"))
+            export::duplicate_area(workspace, &id, new_id)?;
+            Ok(CommandEffect::undoable("Duplicate Area"))
         },
     )?;
     register_export_command(
         registry,
-        "export_area.set_tags",
-        "Set Export Area Tags",
-        "Set comma-separated export area tags.",
-        &["tag export area"],
+        "area.set_tags",
+        "Set Area Tags",
+        "Set comma-separated area tags.",
+        &["tag area"],
         None,
         vec![
-            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("id", "Area ID", ParameterKind::ObjectId, true),
             prompt("tags", "Tags", ParameterKind::String, true),
         ],
         |workspace, invocation, runtime| {
@@ -1802,19 +1802,19 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
                 .split(',')
                 .map(str::to_owned)
                 .collect();
-            export::set_export_area_tags(workspace, &id, tags)?;
-            Ok(CommandEffect::undoable("Set Export Area Tags"))
+            export::set_area_tags(workspace, &id, tags)?;
+            Ok(CommandEffect::undoable("Set Area Tags"))
         },
     )?;
     register_export_command(
         registry,
-        "export_area.group",
-        "Create Export Area Group",
-        "Create a group containing an export area.",
-        &["group export area"],
+        "area.group",
+        "Create Area Group",
+        "Create a group containing an area.",
+        &["group area"],
         None,
         vec![
-            prompt("id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("id", "Area ID", ParameterKind::ObjectId, true),
             prompt("group_id", "Group ID", ParameterKind::ObjectId, true),
             prompt("name", "Name", ParameterKind::String, true),
         ],
@@ -1823,31 +1823,31 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
             let id = required_object_id(&invocation.parameters, "id")?;
             let group_id = required_object_id(&invocation.parameters, "group_id")?;
             let name = invocation.parameters.required_string("name")?.to_owned();
-            export::group_export_area(workspace, &id, group_id, name.clone())?;
+            export::group_area(workspace, &id, group_id, name.clone())?;
             Ok(CommandEffect::undoable(format!(
-                "Create Export Area Group {name}"
+                "Create Area Group {name}"
             )))
         },
     )?;
     register_export_command(
         registry,
-        "export_area.delete",
-        "Delete Export Area",
-        "Delete an export area.",
-        &["remove export area"],
+        "area.delete",
+        "Delete Area",
+        "Delete an area.",
+        &["remove area"],
         Some("Delete"),
         vec![prompt(
             "id",
-            "Export Area ID",
+            "Area ID",
             ParameterKind::ObjectId,
             true,
         )],
         |workspace, invocation, runtime| {
             runtime.ensure_not_cancelled()?;
             let id = required_object_id(&invocation.parameters, "id")?;
-            let deleted = export::delete_export_area(workspace, &id)?;
+            let deleted = export::delete_area(workspace, &id)?;
             Ok(CommandEffect::undoable(format!(
-                "Delete Export Area {}",
+                "Delete Area {}",
                 deleted.name
             )))
         },
@@ -1872,7 +1872,7 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
         registry,
         "output.remove",
         "Remove Output",
-        "Remove an output definition and detach it from export areas.",
+        "Remove an output definition and detach it from areas.",
         &["delete output"],
         Some("Delete"),
         vec![prompt("id", "Output ID", ParameterKind::ObjectId, true)],
@@ -1926,13 +1926,13 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
     )?;
     register_export_command(
         registry,
-        "export_area.attach_output",
-        "Attach Output To Export Area",
-        "Attach an output definition to an export area.",
-        &["add output to export area"],
+        "area.attach_output",
+        "Attach Output To Area",
+        "Attach an output definition to an area.",
+        &["add output to area"],
         None,
         vec![
-            prompt("area_id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("area_id", "Area ID", ParameterKind::ObjectId, true),
             prompt("output_id", "Output ID", ParameterKind::ObjectId, true),
         ],
         |workspace, invocation, runtime| {
@@ -1940,18 +1940,18 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
             let area_id = required_object_id(&invocation.parameters, "area_id")?;
             let output_id = required_object_id(&invocation.parameters, "output_id")?;
             export::attach_output_to_area(workspace, &area_id, output_id)?;
-            Ok(CommandEffect::undoable("Attach Output To Export Area"))
+            Ok(CommandEffect::undoable("Attach Output To Area"))
         },
     )?;
     register_export_command(
         registry,
-        "export_area.detach_output",
-        "Detach Output From Export Area",
-        "Detach an output definition from an export area.",
-        &["remove output from export area"],
+        "area.detach_output",
+        "Detach Output From Area",
+        "Detach an output definition from an area.",
+        &["remove output from area"],
         None,
         vec![
-            prompt("area_id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("area_id", "Area ID", ParameterKind::ObjectId, true),
             prompt("output_id", "Output ID", ParameterKind::ObjectId, true),
         ],
         |workspace, invocation, runtime| {
@@ -1959,18 +1959,18 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
             let area_id = required_object_id(&invocation.parameters, "area_id")?;
             let output_id = required_object_id(&invocation.parameters, "output_id")?;
             export::detach_output_from_area(workspace, &area_id, &output_id)?;
-            Ok(CommandEffect::undoable("Detach Output From Export Area"))
+            Ok(CommandEffect::undoable("Detach Output From Area"))
         },
     )?;
     register_export_command(
         registry,
-        "export_area.set_layer_inclusion",
-        "Set Export Area Layer Inclusion",
-        "Include, exclude, or inherit a layer for an export area.",
+        "area.set_layer_inclusion",
+        "Set Area Layer Inclusion",
+        "Include, exclude, or inherit a layer for an area.",
         &["export layer rule"],
         None,
         vec![
-            prompt("area_id", "Export Area ID", ParameterKind::ObjectId, true),
+            prompt("area_id", "Area ID", ParameterKind::ObjectId, true),
             prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
             prompt(
                 "participation",
@@ -1987,7 +1987,7 @@ fn register_export_commands(registry: &mut CommandRegistry) -> Result<(), Comman
                 invocation.parameters.required_string("participation")?,
             )?;
             export::set_layer_inclusion(workspace, &area_id, layer_id, participation)?;
-            Ok(CommandEffect::undoable("Set Export Area Layer Inclusion"))
+            Ok(CommandEffect::undoable("Set Area Layer Inclusion"))
         },
     )?;
     Ok(())
@@ -3433,7 +3433,7 @@ mod tests {
     }
 
     #[test]
-    fn export_area_and_output_commands_are_undoable() {
+    fn area_and_output_commands_are_undoable() {
         let registry = default_command_registry().expect("registry");
         let mut engine = CommandEngine::new();
         let mut workspace = Workspace::empty(id("workspace"));
@@ -3459,7 +3459,7 @@ mod tests {
                 &mut workspace,
                 &registry,
                 invocation(
-                    "export_area.create",
+                    "area.create",
                     vec![
                         ("id", JsonValue::String("area".to_owned())),
                         ("name", JsonValue::String("Icon".to_owned())),
@@ -3475,7 +3475,7 @@ mod tests {
                 &mut workspace,
                 &registry,
                 invocation(
-                    "export_area.attach_output",
+                    "area.attach_output",
                     vec![
                         ("area_id", JsonValue::String("area".to_owned())),
                         ("output_id", JsonValue::String("output".to_owned())),
@@ -3486,15 +3486,15 @@ mod tests {
             .expect("attach output");
 
         assert_eq!(workspace.outputs.len(), 1);
-        assert_eq!(workspace.export_areas.len(), 1);
-        assert_eq!(workspace.export_areas[0].output_ids, vec![id("output")]);
+        assert_eq!(workspace.areas.len(), 1);
+        assert_eq!(workspace.areas[0].output_ids, vec![id("output")]);
         assert_eq!(workspace.history.entries.len(), 3);
 
         engine.undo(&mut workspace).expect("undo attach");
-        assert!(workspace.export_areas[0].output_ids.is_empty());
+        assert!(workspace.areas[0].output_ids.is_empty());
 
         engine.undo(&mut workspace).expect("undo area");
-        assert!(workspace.export_areas.is_empty());
+        assert!(workspace.areas.is_empty());
 
         engine.undo(&mut workspace).expect("undo output");
         assert!(workspace.outputs.is_empty());
@@ -3556,7 +3556,7 @@ mod tests {
                 &mut workspace,
                 &registry,
                 invocation(
-                    "selection.export_area_from_selection",
+                    "selection.area_from_selection",
                     vec![
                         ("id", JsonValue::String("selection".to_owned())),
                         ("area_id", JsonValue::String("area".to_owned())),
@@ -3568,7 +3568,7 @@ mod tests {
             .expect("area");
 
         assert_eq!(workspace.selections.len(), 1);
-        assert_eq!(workspace.export_areas[0].bounds.width, 8.0);
+        assert_eq!(workspace.areas[0].bounds.width, 8.0);
         assert!(workspace.selections[0]
             .mask
             .as_ref()
@@ -3578,7 +3578,7 @@ mod tests {
             .any(|alpha| *alpha < 255));
 
         engine.undo(&mut workspace).expect("undo area");
-        assert!(workspace.export_areas.is_empty());
+        assert!(workspace.areas.is_empty());
         engine.undo(&mut workspace).expect("undo feather");
         assert!(workspace.selections[0]
             .mask

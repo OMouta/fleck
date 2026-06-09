@@ -10,13 +10,13 @@
   </p>
 </div>
 
-Fleck is an open-source, cross-platform raster image editor built around an infinite workspace, command palette, and first-class export areas. 
+Fleck is an open-source, cross-platform raster image editor built around an infinite workspace, command palette, and first-class areas. 
 
 It provides a flexible workspace for editing images, arranging assets, and exporting specific regions of the canvas.
 
 ## Overview
 
-Fleck combines traditional raster editing with named export areas.
+Fleck combines traditional raster editing with named areas.
 
 You can place images on a workspace, edit pixels directly, create export regions, and export those regions in different formats and sizes.
 
@@ -29,25 +29,25 @@ You can place images on a workspace, edit pixels directly, create export regions
 - Pixel editing
 - Text and shapes
 - Background removal
-- Named export areas
-- Multiple outputs per export area
+- Named areas
+- Multiple outputs per area
 - Icon and favicon exports
 - Batch exports
 - Command palette
 
-## Export areas
+## Areas
 
-Export areas are named regions of the workspace.
+Areas are named regions of the workspace.
 
-Each export area can define its own output settings, including size, format, padding, background, filename, and export path.
+Each area can define its own output settings, including size, format, padding, background, filename, and export path.
 
-A workspace can contain multiple export areas.
+A workspace can contain multiple areas.
 
 ## File format
 
 Fleck workspaces are saved as `.fleck` files.
 
-A workspace stores the canvas, layers, source images, export areas, output settings, and document metadata.
+A workspace stores the canvas, layers, source images, areas, output settings, and document metadata.
 
 ## Status
 

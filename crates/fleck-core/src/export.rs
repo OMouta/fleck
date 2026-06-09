@@ -1,11 +1,11 @@
 use crate::model::{
-    CompressionSettings, ExportArea, ExportBackground, ExportParticipation, MetadataBehavior,
+    CompressionSettings, Area, ExportBackground, ExportParticipation, MetadataBehavior,
     ObjectGroup, ObjectId, OutputDefinition, OutputFormat, Padding, Rect, TransparencyBehavior,
     TrimBehavior, Workspace,
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct NewExportArea {
+pub struct NewArea {
     pub id: ObjectId,
     pub name: String,
     pub bounds: Rect,
@@ -96,19 +96,19 @@ pub enum ExportWarning {
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ExportError {
-    #[error("export area `{id}` was not found")]
+    #[error("area `{id}` was not found")]
     AreaNotFound { id: ObjectId },
     #[error("output `{id}` was not found")]
     OutputNotFound { id: ObjectId },
     #[error("layer `{id}` was not found")]
     LayerNotFound { id: ObjectId },
-    #[error("export area `{id}` already exists")]
+    #[error("area `{id}` already exists")]
     DuplicateAreaId { id: ObjectId },
     #[error("output `{id}` already exists")]
     DuplicateOutputId { id: ObjectId },
     #[error("object group `{id}` already exists")]
     DuplicateGroupId { id: ObjectId },
-    #[error("export area bounds must be positive")]
+    #[error("area bounds must be positive")]
     NonPositiveAreaBounds,
     #[error("output filename cannot be empty")]
     EmptyFilename,
@@ -118,13 +118,13 @@ pub enum ExportError {
 
 pub type ExportResult<T> = Result<T, ExportError>;
 
-pub fn create_export_area(workspace: &mut Workspace, area: NewExportArea) -> ExportResult<()> {
+pub fn create_area(workspace: &mut Workspace, area: NewArea) -> ExportResult<()> {
     ensure_area_id_available(workspace, &area.id)?;
     validate_area_bounds(area.bounds)?;
     require_outputs(workspace, &area.output_ids)?;
     require_layers(workspace, &area.included_layer_ids)?;
     require_layers(workspace, &area.excluded_layer_ids)?;
-    workspace.export_areas.push(ExportArea {
+    workspace.areas.push(Area {
         id: area.id,
         name: area.name,
         bounds: area.bounds,
@@ -140,7 +140,7 @@ pub fn create_export_area(workspace: &mut Workspace, area: NewExportArea) -> Exp
     Ok(())
 }
 
-pub fn rename_export_area(
+pub fn rename_area(
     workspace: &mut Workspace,
     id: &ObjectId,
     name: String,
@@ -149,7 +149,7 @@ pub fn rename_export_area(
     Ok(())
 }
 
-pub fn move_export_area(
+pub fn move_area(
     workspace: &mut Workspace,
     id: &ObjectId,
     x: f32,
@@ -161,7 +161,7 @@ pub fn move_export_area(
     Ok(())
 }
 
-pub fn resize_export_area(
+pub fn resize_area(
     workspace: &mut Workspace,
     id: &ObjectId,
     width: f32,
@@ -179,7 +179,7 @@ pub fn resize_export_area(
     Ok(())
 }
 
-pub fn set_export_area_padding(
+pub fn set_area_padding(
     workspace: &mut Workspace,
     id: &ObjectId,
     padding: Padding,
@@ -189,7 +189,7 @@ pub fn set_export_area_padding(
     Ok(())
 }
 
-pub fn set_export_area_background(
+pub fn set_area_background(
     workspace: &mut Workspace,
     id: &ObjectId,
     background: ExportBackground,
@@ -199,7 +199,7 @@ pub fn set_export_area_background(
     Ok(())
 }
 
-pub fn duplicate_export_area(
+pub fn duplicate_area(
     workspace: &mut Workspace,
     id: &ObjectId,
     new_id: ObjectId,
@@ -209,11 +209,11 @@ pub fn duplicate_export_area(
     let mut duplicate = source.clone();
     duplicate.id = new_id;
     duplicate.name = format!("{} Copy", duplicate.name);
-    workspace.export_areas.push(duplicate);
+    workspace.areas.push(duplicate);
     Ok(())
 }
 
-pub fn set_export_area_tags(
+pub fn set_area_tags(
     workspace: &mut Workspace,
     id: &ObjectId,
     tags: Vec<String>,
@@ -222,7 +222,7 @@ pub fn set_export_area_tags(
     Ok(())
 }
 
-pub fn group_export_area(
+pub fn group_area(
     workspace: &mut Workspace,
     id: &ObjectId,
     group_id: ObjectId,
@@ -244,9 +244,9 @@ pub fn group_export_area(
     Ok(())
 }
 
-pub fn delete_export_area(workspace: &mut Workspace, id: &ObjectId) -> ExportResult<ExportArea> {
+pub fn delete_area(workspace: &mut Workspace, id: &ObjectId) -> ExportResult<Area> {
     let index = require_area_index(workspace, id)?;
-    let deleted = workspace.export_areas.remove(index);
+    let deleted = workspace.areas.remove(index);
     for group in &mut workspace.object_groups {
         group.member_ids.retain(|member_id| member_id != id);
     }
@@ -279,7 +279,7 @@ pub fn add_output(workspace: &mut Workspace, output: NewOutput) -> ExportResult<
 pub fn remove_output(workspace: &mut Workspace, id: &ObjectId) -> ExportResult<OutputDefinition> {
     let index = require_output_index(workspace, id)?;
     let removed = workspace.outputs.remove(index);
-    for area in &mut workspace.export_areas {
+    for area in &mut workspace.areas {
         area.output_ids.retain(|output_id| output_id != id);
     }
     Ok(removed)
@@ -390,14 +390,14 @@ pub fn set_layer_inclusion(
 
 pub fn preview_workspace_exports(workspace: &Workspace) -> Vec<ExportPreview> {
     workspace
-        .export_areas
+        .areas
         .iter()
-        .map(|area| preview_export_area(workspace, &area.id))
+        .map(|area| preview_area(workspace, &area.id))
         .collect::<ExportResult<Vec<_>>>()
         .unwrap_or_default()
 }
 
-pub fn preview_export_area(
+pub fn preview_area(
     workspace: &Workspace,
     area_id: &ObjectId,
 ) -> ExportResult<ExportPreview> {
@@ -471,7 +471,7 @@ fn output_preview(output: &OutputDefinition, bounds: PixelRect) -> OutputPreview
     }
 }
 
-fn participating_layers(workspace: &Workspace, area: &ExportArea) -> Vec<ObjectId> {
+fn participating_layers(workspace: &Workspace, area: &Area) -> Vec<ObjectId> {
     workspace
         .layers
         .iter()
@@ -560,9 +560,9 @@ fn scale_ratio(scale: f32) -> OutputScale {
     }
 }
 
-fn require_area<'a>(workspace: &'a Workspace, id: &ObjectId) -> ExportResult<&'a ExportArea> {
+fn require_area<'a>(workspace: &'a Workspace, id: &ObjectId) -> ExportResult<&'a Area> {
     workspace
-        .export_areas
+        .areas
         .iter()
         .find(|area| area.id == *id)
         .ok_or_else(|| ExportError::AreaNotFound { id: id.clone() })
@@ -571,9 +571,9 @@ fn require_area<'a>(workspace: &'a Workspace, id: &ObjectId) -> ExportResult<&'a
 fn require_area_mut<'a>(
     workspace: &'a mut Workspace,
     id: &ObjectId,
-) -> ExportResult<&'a mut ExportArea> {
+) -> ExportResult<&'a mut Area> {
     workspace
-        .export_areas
+        .areas
         .iter_mut()
         .find(|area| area.id == *id)
         .ok_or_else(|| ExportError::AreaNotFound { id: id.clone() })
@@ -581,7 +581,7 @@ fn require_area_mut<'a>(
 
 fn require_area_index(workspace: &Workspace, id: &ObjectId) -> ExportResult<usize> {
     workspace
-        .export_areas
+        .areas
         .iter()
         .position(|area| area.id == *id)
         .ok_or_else(|| ExportError::AreaNotFound { id: id.clone() })
@@ -643,7 +643,7 @@ fn require_layers(workspace: &Workspace, ids: &[ObjectId]) -> ExportResult<()> {
 }
 
 fn ensure_area_id_available(workspace: &Workspace, id: &ObjectId) -> ExportResult<()> {
-    if workspace.export_areas.iter().any(|area| area.id == *id) {
+    if workspace.areas.iter().any(|area| area.id == *id) {
         Err(ExportError::DuplicateAreaId { id: id.clone() })
     } else {
         Ok(())
@@ -664,16 +664,16 @@ mod tests {
     use crate::model::{BlendMode, ClippingBehavior, Layer, Point, Transform};
 
     #[test]
-    fn export_area_and_output_operations_manage_metadata_only() {
+    fn area_and_output_operations_manage_metadata_only() {
         let mut workspace = workspace();
         workspace.layers.push(layer("base"));
         add_output(&mut workspace, output("png")).expect("add output");
-        create_export_area(&mut workspace, area("icon")).expect("create area");
+        create_area(&mut workspace, area("icon")).expect("create area");
 
-        rename_export_area(&mut workspace, &id("icon"), "app-icon".to_owned()).expect("rename");
-        move_export_area(&mut workspace, &id("icon"), 10.0, 20.0).expect("move");
-        resize_export_area(&mut workspace, &id("icon"), 64.0, 32.0).expect("resize");
-        set_export_area_tags(
+        rename_area(&mut workspace, &id("icon"), "app-icon".to_owned()).expect("rename");
+        move_area(&mut workspace, &id("icon"), 10.0, 20.0).expect("move");
+        resize_area(&mut workspace, &id("icon"), 64.0, 32.0).expect("resize");
+        set_area_tags(
             &mut workspace,
             &id("icon"),
             vec![" app ".to_owned(), "app".to_owned(), "icon".to_owned()],
@@ -687,7 +687,7 @@ mod tests {
         )
         .expect("include");
 
-        let area = &workspace.export_areas[0];
+        let area = &workspace.areas[0];
         assert_eq!(area.name, "app-icon");
         assert_eq!(area.bounds.x, 10.0);
         assert_eq!(area.bounds.width, 64.0);
@@ -712,13 +712,13 @@ mod tests {
             },
         )
         .expect("update");
-        create_export_area(&mut workspace, area("icon")).expect("area");
+        create_area(&mut workspace, area("icon")).expect("area");
         attach_output_to_area(&mut workspace, &id("icon"), id("webp")).expect("attach");
         remove_output(&mut workspace, &id("png")).expect("remove");
 
         assert_eq!(workspace.outputs.len(), 1);
         assert_eq!(workspace.outputs[0].filename, "icon.webp");
-        assert_eq!(workspace.export_areas[0].output_ids, vec![id("webp")]);
+        assert_eq!(workspace.areas[0].output_ids, vec![id("webp")]);
     }
 
     #[test]
@@ -744,9 +744,9 @@ mod tests {
             left: 5.0,
         };
         area.output_ids = vec![id("jpeg")];
-        create_export_area(&mut workspace, area).expect("area");
+        create_area(&mut workspace, area).expect("area");
 
-        let preview = preview_export_area(&workspace, &id("hero")).expect("preview");
+        let preview = preview_area(&workspace, &id("hero")).expect("preview");
 
         assert_eq!(preview.source_bounds.width, 41);
         assert_eq!(preview.padded_bounds.width, 49);
@@ -765,8 +765,8 @@ mod tests {
         Workspace::empty(id("workspace"))
     }
 
-    fn area(value: &str) -> NewExportArea {
-        NewExportArea {
+    fn area(value: &str) -> NewArea {
+        NewArea {
             id: id(value),
             name: value.to_owned(),
             bounds: Rect {

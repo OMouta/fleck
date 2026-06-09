@@ -65,9 +65,9 @@ export function SelectMenu() {
           <Layers />
           Layer from selection
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={!has} onSelect={() => execute("selection.export_area_from_selection")}>
+        <DropdownMenuItem disabled={!has} onSelect={() => execute("selection.area_from_selection")}>
           <Frame />
-          Export area from selection
+          Area from selection
         </DropdownMenuItem>
         <DropdownMenuItem disabled={!has} onSelect={() => execute("selection.direct_export")}>
           <FileDown />

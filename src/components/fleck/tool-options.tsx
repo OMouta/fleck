@@ -127,7 +127,7 @@ function ToolOptionsFor({ activeTool }: { activeTool: string }) {
       );
     case "crop":
       return <span className="text-muted-foreground">Drag to set the crop rectangle.</span>;
-    case "export-area":
+    case "area":
       return <span className="text-muted-foreground">Click an empty area to mark a region.</span>;
     case "move":
       return <span className="text-muted-foreground">Drag layers or arrow-nudge the active selection.</span>;
