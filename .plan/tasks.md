@@ -451,7 +451,7 @@ Acceptance criteria:
 
 ### TASK-FE-010: Build Tool Strip And Pixel Tool Options
 
-Status: open
+Status: done
 
 Requirements: REQ-015, REQ-016, REQ-038, REQ-045, REQ-052
 
