@@ -7,7 +7,7 @@ use fleck_core::export::{preview_export_area, ExportWarning, OutputScale};
 use fleck_core::image_import;
 use fleck_core::model::{
     AssetSource, ExportArea, ExportBackground, HistoryState, ImageObject, JsonValue, Layer,
-    ObjectId, OutputFormat, Padding, Rect, TransparencyBehavior, Workspace,
+    ObjectId, OutputFormat, Padding, Rect, SelectionKind, TransparencyBehavior, Workspace,
 };
 use fleck_core::persistence::{
     load_package_from_path, save_package_to_path, LoadWarning, WorkspacePackage,
@@ -343,6 +343,14 @@ pub struct RenderGuideDto {
 pub struct RenderSelectionDto {
     id: String,
     rect: RectDto,
+    /// Snake-case discriminator matching `SelectionKind` (e.g. "rectangular",
+    /// "elliptical", "lasso", "polygon", "magic_wand", "color_range").
+    kind: String,
+    /// Path vertices in workspace coordinates, sent for lasso/polygon so the
+    /// frontend can draw the actual shape outline instead of falling back to the
+    /// bounding rectangle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    points: Option<Vec<PointDto>>,
 }
 
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
@@ -1339,9 +1347,27 @@ fn render_model(package: &WorkspacePackage) -> RenderModelDto {
         selections: workspace
             .selections
             .iter()
-            .map(|selection| RenderSelectionDto {
-                id: selection.id.as_str().to_owned(),
-                rect: rect_dto(selection.bounds),
+            .map(|selection| {
+                let (kind, points) = match &selection.kind {
+                    SelectionKind::Rectangular => ("rectangular", None),
+                    SelectionKind::Elliptical => ("elliptical", None),
+                    SelectionKind::Lasso { points } => (
+                        "lasso",
+                        Some(points.iter().map(|p| PointDto { x: p.x, y: p.y }).collect()),
+                    ),
+                    SelectionKind::Polygon { points } => (
+                        "polygon",
+                        Some(points.iter().map(|p| PointDto { x: p.x, y: p.y }).collect()),
+                    ),
+                    SelectionKind::MagicWand { .. } => ("magic_wand", None),
+                    SelectionKind::ColorRange { .. } => ("color_range", None),
+                };
+                RenderSelectionDto {
+                    id: selection.id.as_str().to_owned(),
+                    rect: rect_dto(selection.bounds),
+                    kind: kind.to_owned(),
+                    points,
+                }
             })
             .collect(),
     }

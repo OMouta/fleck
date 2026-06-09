@@ -620,7 +620,7 @@ pub enum ExportParticipation {
 pub enum SelectionKind {
     Rectangular,
     Elliptical,
-    Lasso,
+    Lasso { points: Vec<Point> },
     Polygon { points: Vec<Point> },
     MagicWand { tolerance: f32 },
     ColorRange { color: RgbaColor, tolerance: f32 },

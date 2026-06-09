@@ -218,7 +218,25 @@ function drawSelections(ctx: CanvasRenderingContext2D, model: RenderModel, vp: V
   ctx.setLineDash([4, 3]);
   for (const sel of model.selections) {
     const r = toScreenRect(vp, sel.rect);
-    ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.width, r.height);
+    if (sel.kind === "elliptical") {
+      const cx = r.x + r.width / 2;
+      const cy = r.y + r.height / 2;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, Math.max(r.width / 2, 0.5), Math.max(r.height / 2, 0.5), 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if ((sel.kind === "lasso" || sel.kind === "polygon") && sel.points && sel.points.length >= 2) {
+      ctx.beginPath();
+      const first = workspaceToScreen(vp, sel.points[0]);
+      ctx.moveTo(first.x + 0.5, first.y + 0.5);
+      for (let i = 1; i < sel.points.length; i++) {
+        const p = workspaceToScreen(vp, sel.points[i]);
+        ctx.lineTo(p.x + 0.5, p.y + 0.5);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    } else {
+      ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.width, r.height);
+    }
   }
   ctx.restore();
 }

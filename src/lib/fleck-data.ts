@@ -84,7 +84,19 @@ export type RenderModel = {
   }[];
   exportAreas: { id: string; name: string; rect: Rect }[];
   guides: { axis: "horizontal" | "vertical"; position: number }[];
-  selections: { id: string; rect: Rect }[];
+  selections: SelectionRender[];
+};
+
+/**
+ * Frontend projection of a selection for canvas rendering. `kind` mirrors the
+ * Rust `SelectionKind` discriminator (snake_case) so we can draw the actual
+ * shape outline; `points` is populated for lasso/polygon selections.
+ */
+export type SelectionRender = {
+  id: string;
+  rect: Rect;
+  kind: "rectangular" | "elliptical" | "lasso" | "polygon" | "magic_wand" | "color_range";
+  points?: Point[];
 };
 
 /** Mirrors `fleck-core::model::BlendMode`. */

@@ -13,7 +13,11 @@ import { queryKeys } from "@/lib/queries";
 import { LAYER_COMMAND_IDS, resolveLayerParams } from "@/lib/layer-commands";
 import { IMAGE_COMMAND_IDS, resolveImageParams } from "@/lib/image-commands";
 import { EXPORT_COMMAND_IDS, resolveExportParams } from "@/lib/export-commands";
-import { SELECTION_COMMAND_IDS, resolveSelectionParams } from "@/lib/selection-commands";
+import {
+  SELECTION_COMMAND_IDS,
+  SELECTION_CREATE_IDS,
+  resolveSelectionParams,
+} from "@/lib/selection-commands";
 import { useUIStore } from "@/store/ui-store";
 
 const RECENT_LIMIT = 6;
@@ -94,6 +98,21 @@ export const useCommandStore = create<CommandState>((set, get) => ({
       createdLayerId = resolved.createdLayerId;
       createdExportAreaId = resolved.createdExportAreaId;
       clearActiveSelection = resolved.removesSelection;
+    }
+
+    // Single-selection invariant: creating a new selection replaces any
+    // existing ones. Without this, marquee/lasso/wand commits accumulate
+    // overlapping selections that the user can't easily clear.
+    if (SELECTION_CREATE_IDS.has(id)) {
+      const existing = queryClient.getQueryData<{ selections: { id: string }[] }>(queryKeys.renderModel);
+      const ids = existing?.selections.map((s) => s.id) ?? [];
+      for (const existingId of ids) {
+        try {
+          await api.runCommand("selection.delete", { id: existingId });
+        } catch {
+          // Already gone — keep going.
+        }
+      }
     }
 
     await api.runCommand(id, runParams);

@@ -221,8 +221,8 @@ fn mask_for_kind(bounds: Rect, kind: &SelectionKind) -> SelectionResult<Selectio
         | SelectionKind::MagicWand { .. }
         | SelectionKind::ColorRange { .. } => alpha.fill(255),
         SelectionKind::Elliptical => fill_ellipse(&mut alpha, width, height),
-        SelectionKind::Lasso | SelectionKind::Polygon { .. } => {
-            alpha.fill(255);
+        SelectionKind::Lasso { points } | SelectionKind::Polygon { points } => {
+            fill_polygon(&mut alpha, width, height, bounds, points);
         }
     }
 
@@ -247,6 +247,37 @@ fn fill_ellipse(alpha: &mut [u8], width: u32, height: u32) {
             let dx = (x as f32 - cx) / rx.max(1.0);
             let dy = (y as f32 - cy) / ry.max(1.0);
             if dx * dx + dy * dy <= 1.0 {
+                alpha[(y * width + x) as usize] = 255;
+            }
+        }
+    }
+}
+
+/// Even-odd point-in-polygon rasterization. Polygon coords are in workspace
+/// space; the mask is bounds-local, so each pixel center is offset by
+/// `bounds.x/y` before testing.
+fn fill_polygon(alpha: &mut [u8], width: u32, height: u32, bounds: Rect, points: &[Point]) {
+    if points.len() < 3 {
+        return;
+    }
+    for y in 0..height {
+        let py = bounds.y + y as f32 + 0.5;
+        for x in 0..width {
+            let px = bounds.x + x as f32 + 0.5;
+            let mut inside = false;
+            let mut j = points.len() - 1;
+            for i in 0..points.len() {
+                let (xi, yi) = (points[i].x, points[i].y);
+                let (xj, yj) = (points[j].x, points[j].y);
+                if (yi > py) != (yj > py) {
+                    let x_intercept = (xj - xi) * (py - yi) / (yj - yi) + xi;
+                    if px < x_intercept {
+                        inside = !inside;
+                    }
+                }
+                j = i;
+            }
+            if inside {
                 alpha[(y * width + x) as usize] = 255;
             }
         }

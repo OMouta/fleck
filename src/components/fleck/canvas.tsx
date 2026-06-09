@@ -248,22 +248,32 @@ export function Canvas() {
     }
   };
 
+  /** Minimum drag distance (workspace px) before a marquee/lasso commits. A
+   * shorter drag is treated as a click — it deselects any active selection
+   * instead of creating a noisy 1-pixel selection. */
+  const COMMIT_MIN_PX = 2;
+
+  const clearActiveSelection = () => {
+    if (activeSelectionId) execute("selection.delete");
+  };
+
   const commitMarqueeDraft = (draft: Extract<SelectionDraft, { kind: "rect" }>) => {
+    const width = Math.round(Math.abs(draft.current.x - draft.start.x));
+    const height = Math.round(Math.abs(draft.current.y - draft.start.y));
+    if (width < COMMIT_MIN_PX || height < COMMIT_MIN_PX) {
+      clearActiveSelection();
+      return;
+    }
     const x = Math.round(Math.min(draft.start.x, draft.current.x));
     const y = Math.round(Math.min(draft.start.y, draft.current.y));
-    const width = Math.max(1, Math.round(Math.abs(draft.current.x - draft.start.x)));
-    const height = Math.max(1, Math.round(Math.abs(draft.current.y - draft.start.y)));
     const commandId = marqueeShape === "ellipse" ? "selection.ellipse" : "selection.rect";
     execute(commandId, { x, y, width, height });
   };
 
   const commitLassoDraft = (draft: Extract<SelectionDraft, { kind: "lasso" }>) => {
-    // Need at least a triangle for a valid mask; otherwise treat as a wand-style click.
+    // Need at least a triangle for a valid mask; shorter strokes deselect.
     if (draft.points.length < 3) {
-      const point = draft.points[0];
-      const x = Math.round(point.x);
-      const y = Math.round(point.y);
-      execute("selection.rect", { x, y, width: 1, height: 1 });
+      clearActiveSelection();
       return;
     }
     execute("selection.lasso", { points: draft.points.map((p) => ({ x: p.x, y: p.y })) });
@@ -272,6 +282,8 @@ export function Canvas() {
   const commitPolygonDraft = (draft: Extract<SelectionDraft, { kind: "polygon" }>) => {
     if (draft.points.length >= 3) {
       execute("selection.polygon", { points: draft.points.map((p) => ({ x: p.x, y: p.y })) });
+    } else {
+      clearActiveSelection();
     }
     setSelectionDraft(null);
   };
@@ -568,13 +580,6 @@ export function Canvas() {
       />
 
       <SelectionHUD />
-
-      {/* Active tool indicator (top-left) */}
-      <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-md border border-border bg-card/80 px-2.5 py-1.5 text-xs backdrop-blur-sm">
-        <span className="size-1.5 rounded-full bg-primary" />
-        <span className="font-medium capitalize text-foreground">{activeTool.replace("-", " ")}</span>
-        <span className="text-muted-foreground">tool active</span>
-      </div>
 
       {/* Overlay toggles (top-right) */}
       <div

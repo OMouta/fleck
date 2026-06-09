@@ -1039,7 +1039,7 @@ fn register_selection_commands(registry: &mut CommandRegistry) -> Result<(), Com
                 workspace,
                 NewSelection {
                     id: required_object_id(&invocation.parameters, "id")?,
-                    kind: SelectionKind::Lasso,
+                    kind: SelectionKind::Lasso { points },
                     bounds,
                     source_layer_ids: source_layer_ids(workspace, invocation)?,
                 },
