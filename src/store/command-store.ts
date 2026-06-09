@@ -124,7 +124,7 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     if (createdImageObjectId) useUIStore.getState().setSelectedImageObjectId(createdImageObjectId);
     if (createdAreaId) {
       useUIStore.getState().setSelectedAreaId(createdAreaId);
-      useUIStore.getState().setSideTab("exports");
+      useUIStore.getState().setSideTab("areas");
     }
     if (createdSelectionId) useUIStore.getState().setActiveSelectionId(createdSelectionId);
     if (clearActiveSelection) useUIStore.getState().setActiveSelectionId(null);

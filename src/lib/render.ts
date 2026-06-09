@@ -34,7 +34,7 @@ type PaintArgs = {
   overlays: OverlaySettings;
   palette: Palette;
   dpr: number;
-  /** Area to emphasize (kept in sync with the exports panel selection). */
+  /** Area to emphasize (kept in sync with the areas panel selection). */
   selectedAreaId?: string | null;
   onAssetsChanged?: () => void;
 };
@@ -98,11 +98,10 @@ export function paintScene({ ctx, model, vp, overlays, palette, dpr, selectedAre
   ctx.clearRect(0, 0, width, height);
 
   drawReferenceGrid(ctx, vp, palette.gridDot);
+  if (overlays.areas) drawAreaBackdrops(ctx, model, vp);
 
   if (model.canvas.width > 0 && model.canvas.height > 0) {
     const canvasRect = toScreenRect(vp, { x: 0, y: 0, width: model.canvas.width, height: model.canvas.height });
-    if (overlays.checkerboard) drawCheckerboard(ctx, canvasRect);
-
     for (const layer of model.layers) {
       if (!layer.visible) continue;
       const r = toScreenRect(vp, layer.rect);
@@ -123,7 +122,7 @@ export function paintScene({ ctx, model, vp, overlays, palette, dpr, selectedAre
     ctx.strokeRect(canvasRect.x + 0.5, canvasRect.y + 0.5, canvasRect.width, canvasRect.height);
   }
 
-  if (overlays.areas) drawAreas(ctx, model, vp, palette, selectedAreaId ?? null);
+  if (overlays.areas) drawAreaOutlines(ctx, model, vp, palette, selectedAreaId ?? null);
   if (overlays.selections) drawSelections(ctx, model, vp, palette);
   if (overlays.transformHandles) drawTransformHandles(ctx, model, vp, palette);
   if (overlays.guides) drawGuides(ctx, model, vp, palette);
@@ -179,7 +178,13 @@ function drawCheckerboard(ctx: CanvasRenderingContext2D, rect: Rect) {
   ctx.restore();
 }
 
-function drawAreas(
+function drawAreaBackdrops(ctx: CanvasRenderingContext2D, model: RenderModel, vp: Viewport) {
+  for (const area of model.areas) {
+    drawCheckerboard(ctx, toScreenRect(vp, area.rect));
+  }
+}
+
+function drawAreaOutlines(
   ctx: CanvasRenderingContext2D,
   model: RenderModel,
   vp: Viewport,

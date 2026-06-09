@@ -119,7 +119,7 @@ export function CommandPalette() {
     return (group: CommandGroup): number => {
       if (group === "layer" && selectedLayerId) return 6;
       if (group === "image_object" && (selectedImageObjectId || sideTab === "images")) return 6;
-      if (group === "export" && (selectedAreaId || sideTab === "exports")) return 6;
+      if (group === "export" && (selectedAreaId || sideTab === "areas")) return 6;
       return 0;
     };
   }, [selectedLayerId, selectedImageObjectId, selectedAreaId, sideTab]);

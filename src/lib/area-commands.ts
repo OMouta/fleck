@@ -1,6 +1,6 @@
 /**
  * Frontend ⇆ core glue for area and output commands, mirroring the
- * `layer-commands` / `image-commands` siblings. The exports panel, inspector,
+ * `layer-commands` / `image-commands` siblings. The areas panel, inspector,
  * canvas context menu, and command palette all express export edits as core
  * command invocations (`area.*` / `output.*`) so every mutation is
  * undoable and shows up in history.

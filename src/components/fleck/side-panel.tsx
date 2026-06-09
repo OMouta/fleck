@@ -92,7 +92,7 @@ export function SidePanel() {
         <TabsList className="border-b border-border p-1.5">
           <PanelTab value="layers" label="Layers" icon={Layers} count={layers.length} active={tab === "layers"} />
           <PanelTab value="images" label="Images" icon={ImageIcon} count={imageObjects.length} active={tab === "images"} />
-          <PanelTab value="exports" label="Exports" icon={FileDown} count={areas.length} active={tab === "exports"} />
+          <PanelTab value="areas" label="Areas" icon={FileDown} count={areas.length} active={tab === "areas"} />
           <PanelTab value="history" label="History" icon={HistoryIcon} active={tab === "history"} />
         </TabsList>
 
@@ -102,8 +102,8 @@ export function SidePanel() {
         <TabsContent value="images">
           <ImagesPanel />
         </TabsContent>
-        <TabsContent value="exports">
-          <ExportsPanel />
+        <TabsContent value="areas">
+          <AreasPanel />
         </TabsContent>
         <TabsContent value="history">
           <HistoryPanel />
@@ -983,7 +983,7 @@ function round(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
-// --- Exports panel -----------------------------------------------------------
+// --- Areas panel -----------------------------------------------------------
 
 /** Export-area actions an action surface can request; mapped to core flows below. */
 type AreaAction = "rename" | "duplicate" | "delete" | "export" | "zoom" | "add-output" | "preview";
@@ -991,7 +991,7 @@ type AreaAction = "rename" | "duplicate" | "delete" | "export" | "zoom" | "add-o
 /** Output actions an action surface can request. */
 type OutputAction = "duplicate" | "detach" | "remove";
 
-function ExportsPanel() {
+function AreasPanel() {
   const { data: areas = [], isLoading } = useAreas();
   const selectedId = useUIStore((s) => s.selectedAreaId);
   const setSelected = useUIStore((s) => s.setSelectedAreaId);

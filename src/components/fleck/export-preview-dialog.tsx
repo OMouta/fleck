@@ -33,7 +33,7 @@ import {
  * the backend job and previews the produced result, with copy/reveal actions.
  *
  * The dialog targets the currently selected area so it stays in sync with
- * the exports panel and canvas selection.
+ * the areas panel and canvas selection.
  */
 export function ExportPreviewDialog() {
   const open = useUIStore((s) => s.exportPreviewOpen);

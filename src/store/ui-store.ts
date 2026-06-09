@@ -9,7 +9,7 @@
  */
 import { create } from "zustand";
 
-export type SideTab = "layers" | "images" | "exports" | "history";
+export type SideTab = "layers" | "images" | "areas" | "history";
 
 /** Marquee variants commit to `selection.rect` or `selection.ellipse`. */
 export type MarqueeShape = "rect" | "ellipse";
@@ -88,7 +88,7 @@ type UIState = {
   setPaletteOpen: (open: boolean) => void;
   togglePalette: () => void;
 
-  // Side panel tab + which area is selected (shared across the exports
+  // Side panel tab + which area is selected (shared across the areas
   // panel, the export inspector, and the canvas highlight/overlay).
   sideTab: SideTab;
   setSideTab: (tab: SideTab) => void;

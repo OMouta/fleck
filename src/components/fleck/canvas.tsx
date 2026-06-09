@@ -43,6 +43,12 @@ type AreaDrag = {
   currentRect: Rect;
 };
 
+type AreaDraft = {
+  pointerId: number;
+  start: Point;
+  current: Point;
+};
+
 /**
  * In-flight selection geometry being drawn by the user. Committed on pointer-up
  * (marquee / freehand lasso / wand) or on dblclick / Enter (polygon).
@@ -92,6 +98,7 @@ export function Canvas() {
   const [dragOver, setDragOver] = useState(false);
   const [assetPaintVersion, setAssetPaintVersion] = useState(0);
   const [areaDrag, setAreaDrag] = useState<AreaDrag | null>(null);
+  const [areaDraft, setAreaDraft] = useState<AreaDraft | null>(null);
   const [selectionDraft, setSelectionDraft] = useState<SelectionDraft | null>(null);
   // Workspace point of the last right-click, used to place a new area there.
   const menuPointRef = useRef<Point>({ x: 0, y: 0 });
@@ -217,7 +224,7 @@ export function Canvas() {
 
   const selectArea = (id: string) => {
     setSelectedAreaId(id);
-    setSideTab("exports");
+    setSideTab("areas");
   };
 
   const startAreaDrag = (hit: { id: string; rect: Rect }, e: React.PointerEvent) => {
@@ -236,6 +243,21 @@ export function Canvas() {
       width: DEFAULT_AREA_SIZE.width,
       height: DEFAULT_AREA_SIZE.height,
     });
+  };
+
+  const startAreaDraft = (e: React.PointerEvent) => {
+    const wp = workspaceFromScreen(pointerPos(e));
+    setAreaDraft({ pointerId: e.pointerId, start: wp, current: wp });
+    (e.target as Element).setPointerCapture(e.pointerId);
+  };
+
+  const commitAreaDraft = (draft: AreaDraft) => {
+    const width = Math.round(Math.abs(draft.current.x - draft.start.x));
+    const height = Math.round(Math.abs(draft.current.y - draft.start.y));
+    if (width < COMMIT_MIN_PX || height < COMMIT_MIN_PX) return;
+    const x = Math.round(Math.min(draft.start.x, draft.current.x));
+    const y = Math.round(Math.min(draft.start.y, draft.current.y));
+    execute("area.create", { name: "Area", x, y, width, height });
   };
 
   const workspaceFromScreen = (pt: Point): Point => screenToWorkspace({ origin, zoom, screen }, pt);
@@ -313,7 +335,7 @@ export function Canvas() {
         selectArea(hit.id);
         startAreaDrag(hit, e);
       } else {
-        createAreaAt(pointerPos(e));
+        startAreaDraft(e);
       }
       return;
     }
@@ -381,6 +403,10 @@ export function Canvas() {
         return;
       }
     }
+    if (areaDraft && e.pointerId === areaDraft.pointerId) {
+      setAreaDraft({ ...areaDraft, current: workspaceFromScreen(pointerPos(e)) });
+      return;
+    }
     if (panning) panByScreen(e.movementX, e.movementY);
   };
 
@@ -398,6 +424,12 @@ export function Canvas() {
         });
       }
       setAreaDrag(null);
+      if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
+      return;
+    }
+    if (areaDraft && e.pointerId === areaDraft.pointerId) {
+      commitAreaDraft(areaDraft);
+      setAreaDraft(null);
       if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
       return;
     }
@@ -536,6 +568,8 @@ export function Canvas() {
     ? "grabbing"
     : areaDrag
       ? "move"
+      : areaDraft
+        ? "crosshair"
     : activeTool === "pan" || spaceHeld
       ? "grab"
       : activeTool === "zoom"
@@ -575,6 +609,8 @@ export function Canvas() {
       )}
 
       {isEmpty && <EmptyState onOpenImage={() => openImageFlow()} onNewWorkspace={() => newWorkspace()} />}
+
+      <AreaDraftOverlay draft={areaDraft} vp={{ origin, zoom, screen }} />
 
       <SelectionDraftOverlay
         draft={selectionDraft}
@@ -758,6 +794,29 @@ function SelectionDraftOverlay({
       {draft.kind === "polygon" &&
         screenPts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={3} fill="hsl(var(--primary))" />)}
     </svg>
+  );
+}
+
+function AreaDraftOverlay({
+  draft,
+  vp,
+}: {
+  draft: AreaDraft | null;
+  vp: { origin: Point; zoom: number; screen: { width: number; height: number } };
+}) {
+  if (!draft) return null;
+  const a = workspaceToScreen(vp, draft.start);
+  const b = workspaceToScreen(vp, draft.current);
+  const left = Math.min(a.x, b.x);
+  const top = Math.min(a.y, b.y);
+  const width = Math.abs(b.x - a.x);
+  const height = Math.abs(b.y - a.y);
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute border border-primary bg-primary/10"
+      style={{ left, top, width, height }}
+    />
   );
 }
 
