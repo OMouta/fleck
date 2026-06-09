@@ -421,7 +421,6 @@ mod tests {
             id: id("workspace"),
             metadata: WorkspaceMetadata::default(),
             canvas: CanvasSettings::default(),
-            layers: Vec::new(),
             image_objects: Vec::new(),
             selections: Vec::new(),
             guides: Vec::new(),

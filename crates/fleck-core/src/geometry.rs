@@ -396,7 +396,7 @@ fn snap_candidates_for_axis(
     }
 
     if settings.layer_bounds || settings.centers || settings.edges {
-        for layer in &workspace.layers {
+        for layer in workspace.layers() {
             candidates.extend(rect_snap_candidates(layer.bounds, axis, settings, true));
         }
     }
@@ -741,7 +741,26 @@ mod tests {
 
     fn snapping_workspace() -> Workspace {
         let mut workspace = Workspace::empty(id("workspace"));
-        workspace.layers.push(Layer {
+        workspace.areas.push(crate::model::Area {
+            id: id("export"),
+            name: "Export".to_owned(),
+            bounds: Rect {
+                x: 200.0,
+                y: 30.0,
+                width: 64.0,
+                height: 64.0,
+            },
+            layers: Vec::new(),
+            padding: Padding::default(),
+            background: ExportBackground::Transparent,
+            trim: TrimBehavior::None,
+            output_ids: Vec::new(),
+            included_layer_ids: Vec::new(),
+            excluded_layer_ids: Vec::new(),
+            tags: Vec::new(),
+            preset_id: None,
+        });
+        workspace.areas[0].layers.push(Layer {
             id: id("layer"),
             name: "Layer".to_owned(),
             visible: true,
@@ -762,24 +781,6 @@ mod tests {
             group_id: None,
             export_participation: ExportParticipation::Included,
             raster: None,
-        });
-        workspace.areas.push(crate::model::Area {
-            id: id("export"),
-            name: "Export".to_owned(),
-            bounds: Rect {
-                x: 200.0,
-                y: 30.0,
-                width: 64.0,
-                height: 64.0,
-            },
-            padding: Padding::default(),
-            background: ExportBackground::Transparent,
-            trim: TrimBehavior::None,
-            output_ids: Vec::new(),
-            included_layer_ids: Vec::new(),
-            excluded_layer_ids: Vec::new(),
-            tags: Vec::new(),
-            preset_id: None,
         });
         workspace.guides.push(Guide {
             id: id("guide-x"),

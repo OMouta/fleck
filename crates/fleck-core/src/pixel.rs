@@ -617,8 +617,7 @@ fn require_layer<'a>(
     id: &ObjectId,
 ) -> PixelResult<&'a crate::model::Layer> {
     workspace
-        .layers
-        .iter()
+        .layers()
         .find(|layer| layer.id == *id)
         .ok_or_else(|| PixelError::LayerNotFound { id: id.clone() })
 }
@@ -628,8 +627,7 @@ fn require_layer_mut<'a>(
     id: &ObjectId,
 ) -> PixelResult<&'a mut crate::model::Layer> {
     workspace
-        .layers
-        .iter_mut()
+        .layers_mut()
         .find(|layer| layer.id == *id)
         .ok_or_else(|| PixelError::LayerNotFound { id: id.clone() })
 }
@@ -748,7 +746,7 @@ fn lerp_color(start: RgbaColor, end: RgbaColor, t: f32) -> RgbaColor {
 mod tests {
     use super::*;
     use crate::layer::{self, NewLayer};
-    use crate::model::SelectionKind;
+    use crate::model::{Area, ExportBackground, Padding, SelectionKind, TrimBehavior};
 
     #[test]
     fn brush_and_eraser_modify_raster_pixels() {
@@ -832,17 +830,37 @@ mod tests {
         rotate_layer(&mut workspace, &id("layer"), 90).expect("rotate");
         flip_layer(&mut workspace, &id("layer"), true).expect("flip");
 
-        let raster = workspace.layers[0].raster.as_ref().expect("raster");
+        let raster = workspace.areas[0].layers[0].raster.as_ref().expect("raster");
         assert_eq!((raster.width, raster.height), (2, 4));
-        assert_eq!(workspace.layers[0].bounds.width, 2.0);
-        assert_eq!(workspace.layers[0].bounds.height, 4.0);
+        assert_eq!(workspace.areas[0].layers[0].bounds.width, 2.0);
+        assert_eq!(workspace.areas[0].layers[0].bounds.height, 4.0);
     }
 
     fn workspace_with_layer() -> Workspace {
         let mut workspace = Workspace::empty(id("workspace"));
+        workspace.areas.push(Area {
+            id: id("area"),
+            name: "Area".to_owned(),
+            bounds: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 4.0,
+                height: 4.0,
+            },
+            layers: Vec::new(),
+            padding: Padding::default(),
+            background: ExportBackground::Transparent,
+            trim: TrimBehavior::None,
+            output_ids: Vec::new(),
+            included_layer_ids: Vec::new(),
+            excluded_layer_ids: Vec::new(),
+            tags: Vec::new(),
+            preset_id: None,
+        });
         layer::create_layer(
             &mut workspace,
             NewLayer {
+                area_id: id("area"),
                 id: id("layer"),
                 name: "Layer".to_owned(),
                 bounds: Rect {
@@ -877,7 +895,7 @@ mod tests {
     }
 
     fn pixel(workspace: &Workspace, x: u32, y: u32) -> RgbaColor {
-        let raster = workspace.layers[0].raster.as_ref().expect("raster");
+        let raster = workspace.areas[0].layers[0].raster.as_ref().expect("raster");
         pixel_at(raster, x, y)
     }
 

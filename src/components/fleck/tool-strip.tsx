@@ -17,7 +17,8 @@ const PLACEHOLDER_TOOLS = new Set(["text", "shape"]);
 export function ToolStrip() {
   const active = useUIStore((s) => s.activeTool);
   const onSelect = useUIStore((s) => s.setActiveTool);
-  const { data: layers = [] } = useLayers();
+  const selectedAreaId = useUIStore((s) => s.selectedAreaId);
+  const { data: layers = [] } = useLayers(selectedAreaId);
   const hasLayer = layers.length > 0;
 
   return (

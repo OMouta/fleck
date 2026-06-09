@@ -129,6 +129,7 @@ pub fn copy_selection(workspace: &Workspace, id: &ObjectId) -> SelectionResult<S
 pub fn layer_from_selection(
     workspace: &mut Workspace,
     selection_id: &ObjectId,
+    area_id: ObjectId,
     layer_id: ObjectId,
     name: String,
 ) -> SelectionResult<()> {
@@ -136,6 +137,7 @@ pub fn layer_from_selection(
     layer::create_layer(
         workspace,
         NewLayer {
+            area_id,
             id: layer_id,
             name,
             bounds: Rect {
@@ -356,7 +358,7 @@ fn ensure_unique_selection_id(workspace: &Workspace, id: &ObjectId) -> Selection
 
 fn require_layers(workspace: &Workspace, ids: &[ObjectId]) -> SelectionResult<()> {
     for id in ids {
-        if !workspace.layers.iter().any(|layer| layer.id == *id) {
+        if !workspace.layers().any(|layer| layer.id == *id) {
             return Err(SelectionError::LayerNotFound { id: id.clone() });
         }
     }
@@ -402,13 +404,14 @@ pub fn color_range_kind(color: RgbaColor, tolerance: f32) -> SelectionKind {
 mod tests {
     use super::*;
     use crate::model::{
-        BlendMode, ClippingBehavior, ExportParticipation, Layer, Transform, Workspace,
+        Area, BlendMode, ClippingBehavior, ExportBackground, ExportParticipation, Layer, Padding,
+        Transform, TrimBehavior, Workspace,
     };
 
     #[test]
     fn creates_alpha_masks_for_rectangular_and_elliptical_selections() {
         let mut workspace = workspace();
-        workspace.layers.push(layer("base"));
+        workspace.areas[0].layers.push(layer("base"));
         create_selection(
             &mut workspace,
             NewSelection {
@@ -440,7 +443,7 @@ mod tests {
     #[test]
     fn edit_operations_preserve_mask_alpha_shape() {
         let mut workspace = workspace();
-        workspace.layers.push(layer("base"));
+        workspace.areas[0].layers.push(layer("base"));
         create_selection(
             &mut workspace,
             NewSelection {
@@ -471,7 +474,7 @@ mod tests {
     #[test]
     fn conversion_uses_selection_bounds() {
         let mut workspace = workspace();
-        workspace.layers.push(layer("base"));
+        workspace.areas[0].layers.push(layer("base"));
         create_selection(
             &mut workspace,
             NewSelection {
@@ -486,6 +489,7 @@ mod tests {
         layer_from_selection(
             &mut workspace,
             &id("selection"),
+            id("area-main"),
             id("from-selection"),
             "From Selection".to_owned(),
         )
@@ -498,20 +502,35 @@ mod tests {
         )
         .expect("area");
 
-        assert_eq!(workspace.layers[1].position, Point { x: 10.0, y: 12.0 });
-        assert_eq!(workspace.layers[1].bounds.width, 20.0);
+        assert_eq!(workspace.areas[0].layers[1].position, Point { x: 10.0, y: 12.0 });
+        assert_eq!(workspace.areas[0].layers[1].bounds.width, 20.0);
         assert_eq!(
-            workspace.areas[0].bounds,
+            workspace.areas[1].bounds,
             rect(10.0, 12.0, 20.0, 24.0)
         );
         assert_eq!(
-            workspace.areas[0].included_layer_ids,
+            workspace.areas[1].included_layer_ids,
             vec![id("base")]
         );
     }
 
     fn workspace() -> Workspace {
-        Workspace::empty(id("workspace"))
+        let mut workspace = Workspace::empty(id("workspace"));
+        workspace.areas.push(Area {
+            id: id("area-main"),
+            name: "Area".to_owned(),
+            bounds: rect(0.0, 0.0, 64.0, 64.0),
+            layers: Vec::new(),
+            padding: Padding::default(),
+            background: ExportBackground::Transparent,
+            trim: TrimBehavior::None,
+            output_ids: Vec::new(),
+            included_layer_ids: Vec::new(),
+            excluded_layer_ids: Vec::new(),
+            tags: Vec::new(),
+            preset_id: None,
+        });
+        workspace
     }
 
     fn layer(value: &str) -> Layer {

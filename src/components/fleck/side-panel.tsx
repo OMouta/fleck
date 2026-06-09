@@ -81,7 +81,8 @@ const KIND_ICON = {
 export function SidePanel() {
   const tab = useUIStore((s) => s.sideTab);
   const setTab = useUIStore((s) => s.setSideTab);
-  const { data: layers = [] } = useLayers();
+  const selectedAreaId = useUIStore((s) => s.selectedAreaId);
+  const { data: layers = [] } = useLayers(selectedAreaId);
   const { data: imageObjects = [] } = useImageObjects();
   const { data: areas = [] } = useAreas();
 
@@ -157,7 +158,8 @@ type LayerAction =
   | "group";
 
 function LayersPanel() {
-  const { data: layers = [], isLoading } = useLayers();
+  const selectedAreaId = useUIStore((s) => s.selectedAreaId);
+  const { data: layers = [], isLoading } = useLayers(selectedAreaId);
   const selected = useUIStore((s) => s.selectedLayerId);
   const onSelect = useUIStore((s) => s.setSelectedLayerId);
   const execute = useCommandStore((s) => s.execute);

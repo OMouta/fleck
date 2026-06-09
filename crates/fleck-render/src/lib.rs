@@ -141,8 +141,7 @@ impl SkiaViewportRenderer {
 
         for (index, layer) in request
             .workspace
-            .layers
-            .iter()
+            .layers()
             .filter(|layer| layer.visible && layer.opacity > 0.0)
             .enumerate()
         {
@@ -266,12 +265,14 @@ impl SkiaViewportRenderer {
     ) -> Result<EncodedExport, ExportPipelineError> {
         let bounds = padded_bounds(area.bounds, area.padding);
         let mut filtered = workspace.clone();
-        filtered.layers = workspace
+        let mut filtered_area = area.clone();
+        filtered_area.layers = area
             .layers
             .iter()
             .filter(|layer| layer_participates_in_area(layer, area))
             .cloned()
             .collect();
+        filtered.areas = vec![filtered_area];
         self.export_bounds(&filtered, bounds, Some(area), output, area.trim)
     }
 
@@ -352,8 +353,7 @@ impl SkiaViewportRenderer {
 
 fn default_export_bounds(workspace: &Workspace) -> Result<Rect, ExportPipelineError> {
     workspace
-        .layers
-        .iter()
+        .layers()
         .filter(|layer| {
             layer.visible
                 && layer.opacity > 0.0
@@ -946,9 +946,7 @@ mod tests {
     #[test]
     fn renders_checkerboard_and_layer_preview_pixels() {
         let mut workspace = workspace();
-        workspace
-            .layers
-            .push(layer("base", 0.0, 0.0, 16.0, 16.0, 1.0));
+        workspace.areas[0].layers.push(layer("base", 0.0, 0.0, 16.0, 16.0, 1.0));
         let frame = render(&workspace, viewport(0.0, 0.0, 1.0, 32.0, 32.0));
 
         assert_eq!(frame.width, 32);
@@ -962,12 +960,8 @@ mod tests {
     #[test]
     fn composites_layers_with_alpha() {
         let mut workspace = workspace();
-        workspace
-            .layers
-            .push(layer("base", 0.0, 0.0, 16.0, 16.0, 1.0));
-        workspace
-            .layers
-            .push(layer("top", 0.0, 0.0, 16.0, 16.0, 0.5));
+        workspace.areas[0].layers.push(layer("base", 0.0, 0.0, 16.0, 16.0, 1.0));
+        workspace.areas[0].layers.push(layer("top", 0.0, 0.0, 16.0, 16.0, 0.5));
         let frame = render_without_overlays(&workspace, viewport(0.0, 0.0, 1.0, 24.0, 24.0));
 
         let composited = pixel_at(&frame, 8, 8);
@@ -978,11 +972,11 @@ mod tests {
     #[test]
     fn blend_modes_change_deterministic_output() {
         let mut normal = workspace();
-        normal.layers.push(layer("base", 0.0, 0.0, 16.0, 16.0, 1.0));
-        normal.layers.push(layer("top", 0.0, 0.0, 16.0, 16.0, 1.0));
+        normal.areas[0].layers.push(layer("base", 0.0, 0.0, 16.0, 16.0, 1.0));
+        normal.areas[0].layers.push(layer("top", 0.0, 0.0, 16.0, 16.0, 1.0));
 
         let mut multiply = normal.clone();
-        multiply.layers[1].blend_mode = BlendMode::Multiply;
+        multiply.areas[0].layers[1].blend_mode = BlendMode::Multiply;
 
         let viewport = viewport(0.0, 0.0, 1.0, 24.0, 24.0);
         let normal_frame = render_without_overlays(&normal, viewport);
@@ -999,7 +993,7 @@ mod tests {
         let mut workspace = workspace();
         let mut hidden = layer("hidden", 0.0, 0.0, 16.0, 16.0, 1.0);
         hidden.visible = false;
-        workspace.layers.push(hidden);
+        workspace.areas[0].layers.push(hidden);
 
         let frame = render_without_overlays(&workspace, viewport(0.0, 0.0, 1.0, 24.0, 24.0));
 
@@ -1009,9 +1003,7 @@ mod tests {
     #[test]
     fn pan_and_zoom_move_rendered_content() {
         let mut workspace = workspace();
-        workspace
-            .layers
-            .push(layer("tile", 10.0, 10.0, 10.0, 10.0, 1.0));
+        workspace.areas[0].layers.push(layer("tile", 10.0, 10.0, 10.0, 10.0, 1.0));
 
         let unpanned = render_without_overlays(&workspace, viewport(0.0, 0.0, 1.0, 32.0, 32.0));
         let panned = render_without_overlays(&workspace, viewport(10.0, 10.0, 2.0, 32.0, 32.0));
@@ -1025,9 +1017,7 @@ mod tests {
     #[test]
     fn reports_and_draws_overlay_hooks() {
         let mut workspace = workspace();
-        workspace
-            .layers
-            .push(layer("base", 0.0, 0.0, 8.0, 8.0, 1.0));
+        workspace.areas[0].layers.push(layer("base", 0.0, 0.0, 8.0, 8.0, 1.0));
         workspace.guides.push(Guide {
             id: id("guide-x"),
             axis: Axis::Vertical,
@@ -1042,10 +1032,12 @@ mod tests {
             source_layer_ids: vec![id("base")],
             mask: None,
         });
-        workspace.areas.push(Area {
+        let layers = std::mem::take(&mut workspace.areas[0].layers);
+        workspace.areas[0] = Area {
             id: id("export"),
             name: "Export".to_owned(),
             bounds: rect(0.0, 0.0, 8.0, 8.0),
+            layers,
             padding: Padding::default(),
             background: ExportBackground::Transparent,
             trim: TrimBehavior::None,
@@ -1054,7 +1046,7 @@ mod tests {
             excluded_layer_ids: Vec::new(),
             tags: Vec::new(),
             preset_id: None,
-        });
+        };
         let overlays = OverlaySettings {
             pixel_grid: PixelGridSettings {
                 enabled: true,
@@ -1082,9 +1074,7 @@ mod tests {
     #[test]
     fn rendering_does_not_mutate_workspace() {
         let mut workspace = workspace();
-        workspace
-            .layers
-            .push(layer("base", 0.0, 0.0, 8.0, 8.0, 1.0));
+        workspace.areas[0].layers.push(layer("base", 0.0, 0.0, 8.0, 8.0, 1.0));
         let before = workspace.clone();
 
         let _ = render(&workspace, viewport(0.0, 0.0, 1.0, 16.0, 16.0));
@@ -1095,9 +1085,7 @@ mod tests {
     #[test]
     fn default_export_uses_visible_layer_bounds_without_areas() {
         let mut workspace = workspace();
-        workspace
-            .layers
-            .push(layer("base", 10.0, 20.0, 16.0, 8.0, 1.0));
+        workspace.areas[0].layers.push(layer("base", 10.0, 20.0, 16.0, 8.0, 1.0));
 
         let export = SkiaViewportRenderer::new()
             .export_workspace_default(
@@ -1118,19 +1106,17 @@ mod tests {
     #[test]
     fn area_outputs_apply_padding_scale_and_layer_rules() {
         let mut workspace = workspace();
-        workspace
-            .layers
-            .push(layer("base", 0.0, 0.0, 16.0, 16.0, 1.0));
-        workspace
-            .layers
-            .push(layer("excluded", 0.0, 0.0, 16.0, 16.0, 1.0));
+        workspace.areas[0].layers.push(layer("base", 0.0, 0.0, 16.0, 16.0, 1.0));
+        workspace.areas[0].layers.push(layer("excluded", 0.0, 0.0, 16.0, 16.0, 1.0));
         workspace
             .outputs
             .push(output("png", OutputFormat::Png, 2.0));
-        workspace.areas.push(Area {
+        let layers = std::mem::take(&mut workspace.areas[0].layers);
+        workspace.areas[0] = Area {
             id: id("area"),
             name: "Area".to_owned(),
             bounds: rect(0.0, 0.0, 10.0, 10.0),
+            layers,
             padding: Padding {
                 top: 1.0,
                 right: 2.0,
@@ -1144,7 +1130,7 @@ mod tests {
             excluded_layer_ids: vec![id("excluded")],
             tags: Vec::new(),
             preset_id: None,
-        });
+        };
 
         let exports = SkiaViewportRenderer::new()
             .area(&workspace, &id("area"))
@@ -1158,9 +1144,7 @@ mod tests {
     #[test]
     fn export_encodes_jpeg_and_webp_with_background_handling() {
         let mut workspace = workspace();
-        workspace
-            .layers
-            .push(layer("base", 0.0, 0.0, 8.0, 8.0, 0.5));
+        workspace.areas[0].layers.push(layer("base", 0.0, 0.0, 8.0, 8.0, 0.5));
         let mut jpeg = output("jpeg", OutputFormat::Jpeg, 1.0);
         jpeg.filename = "image.jpg".to_owned();
         jpeg.background = ExportBackground::Solid {
@@ -1198,9 +1182,7 @@ mod tests {
     #[test]
     fn transparent_and_solid_png_exports_have_expected_alpha() {
         let mut workspace = workspace();
-        workspace
-            .layers
-            .push(layer("base", 0.0, 0.0, 4.0, 4.0, 1.0));
+        workspace.areas[0].layers.push(layer("base", 0.0, 0.0, 4.0, 4.0, 1.0));
         let workspace = workspace_with_selection(workspace);
         let transparent = output("transparent", OutputFormat::Png, 1.0);
         let mut solid = output("solid", OutputFormat::Png, 1.0);
@@ -1229,16 +1211,16 @@ mod tests {
     #[test]
     fn transparent_trim_crops_empty_padding_before_flattening() {
         let mut workspace = workspace();
-        workspace
-            .layers
-            .push(layer("base", 4.0, 4.0, 4.0, 4.0, 1.0));
+        workspace.areas[0].layers.push(layer("base", 4.0, 4.0, 4.0, 4.0, 1.0));
         workspace
             .outputs
             .push(output("png", OutputFormat::Png, 1.0));
-        workspace.areas.push(Area {
+        let layers = std::mem::take(&mut workspace.areas[0].layers);
+        workspace.areas[0] = Area {
             id: id("area"),
             name: "Area".to_owned(),
             bounds: rect(0.0, 0.0, 16.0, 16.0),
+            layers,
             padding: Padding::default(),
             background: ExportBackground::Transparent,
             trim: TrimBehavior::TransparentPixels,
@@ -1247,7 +1229,7 @@ mod tests {
             excluded_layer_ids: Vec::new(),
             tags: Vec::new(),
             preset_id: None,
-        });
+        };
 
         let export = SkiaViewportRenderer::new()
             .area(&workspace, &id("area"))
@@ -1307,7 +1289,22 @@ mod tests {
     }
 
     fn workspace() -> Workspace {
-        Workspace::empty(id("workspace"))
+        let mut workspace = Workspace::empty(id("workspace"));
+        workspace.areas.push(Area {
+            id: id("area"),
+            name: "Area".to_owned(),
+            bounds: rect(0.0, 0.0, 32.0, 32.0),
+            layers: Vec::new(),
+            padding: Padding::default(),
+            background: ExportBackground::Transparent,
+            trim: TrimBehavior::None,
+            output_ids: Vec::new(),
+            included_layer_ids: Vec::new(),
+            excluded_layer_ids: Vec::new(),
+            tags: Vec::new(),
+            preset_id: None,
+        });
+        workspace
     }
 
     fn workspace_with_selection(mut workspace: Workspace) -> Workspace {

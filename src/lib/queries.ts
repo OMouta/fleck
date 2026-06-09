@@ -10,7 +10,7 @@ import { api } from "./api";
 
 export const queryKeys = {
   workspaceMeta: ["workspace", "meta"] as const,
-  layers: ["document", "layers"] as const,
+  layers: (areaId?: string | null) => ["document", "layers", areaId ?? null] as const,
   imageObjects: ["document", "image-objects"] as const,
   areas: ["document", "areas"] as const,
   history: ["document", "history"] as const,
@@ -24,8 +24,8 @@ export function useWorkspaceMeta() {
   return useQuery({ queryKey: queryKeys.workspaceMeta, queryFn: api.getWorkspaceMeta });
 }
 
-export function useLayers() {
-  return useQuery({ queryKey: queryKeys.layers, queryFn: api.getLayers });
+export function useLayers(areaId?: string | null) {
+  return useQuery({ queryKey: queryKeys.layers(areaId), queryFn: () => api.getLayers(areaId) });
 }
 
 export function useImageObjects() {

@@ -128,6 +128,7 @@ pub fn create_area(workspace: &mut Workspace, area: NewArea) -> ExportResult<()>
         id: area.id,
         name: area.name,
         bounds: area.bounds,
+        layers: Vec::new(),
         padding: area.padding,
         background: area.background,
         trim: area.trim,
@@ -473,8 +474,7 @@ fn output_preview(output: &OutputDefinition, bounds: PixelRect) -> OutputPreview
 
 fn participating_layers(workspace: &Workspace, area: &Area) -> Vec<ObjectId> {
     workspace
-        .layers
-        .iter()
+        .layers()
         .filter(|layer| layer.visible && layer.opacity > 0.0)
         .filter(|layer| layer.export_participation != ExportParticipation::Excluded)
         .filter(|layer| {
@@ -622,8 +622,7 @@ fn require_layer<'a>(
     id: &ObjectId,
 ) -> ExportResult<&'a crate::model::Layer> {
     workspace
-        .layers
-        .iter()
+        .layers()
         .find(|layer| layer.id == *id)
         .ok_or_else(|| ExportError::LayerNotFound { id: id.clone() })
 }
@@ -666,9 +665,9 @@ mod tests {
     #[test]
     fn area_and_output_operations_manage_metadata_only() {
         let mut workspace = workspace();
-        workspace.layers.push(layer("base"));
         add_output(&mut workspace, output("png")).expect("add output");
         create_area(&mut workspace, area("icon")).expect("create area");
+        workspace.areas[0].layers.push(layer("base"));
 
         rename_area(&mut workspace, &id("icon"), "app-icon".to_owned()).expect("rename");
         move_area(&mut workspace, &id("icon"), 10.0, 20.0).expect("move");
@@ -693,7 +692,7 @@ mod tests {
         assert_eq!(area.bounds.width, 64.0);
         assert_eq!(area.tags, vec!["app", "icon"]);
         assert_eq!(area.included_layer_ids, vec![id("base")]);
-        assert!(workspace.layers.iter().any(|layer| layer.id == id("base")));
+        assert!(workspace.layers().any(|layer| layer.id == id("base")));
     }
 
     #[test]
@@ -724,7 +723,6 @@ mod tests {
     #[test]
     fn preview_reports_outputs_dimensions_layers_and_warnings() {
         let mut workspace = workspace();
-        workspace.layers.push(layer("base"));
         let mut jpeg = output("jpeg");
         jpeg.format = OutputFormat::Jpeg;
         jpeg.transparency = TransparencyBehavior::Preserve;
@@ -745,6 +743,7 @@ mod tests {
         };
         area.output_ids = vec![id("jpeg")];
         create_area(&mut workspace, area).expect("area");
+        workspace.areas[0].layers.push(layer("base"));
 
         let preview = preview_area(&workspace, &id("hero")).expect("preview");
 

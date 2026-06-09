@@ -39,7 +39,7 @@ type CommandState = {
 function invalidateAfterCommand() {
   queryClient.invalidateQueries({ queryKey: queryKeys.history });
   queryClient.invalidateQueries({ queryKey: queryKeys.workspaceMeta });
-  queryClient.invalidateQueries({ queryKey: queryKeys.layers });
+  queryClient.invalidateQueries({ queryKey: ["document", "layers"] });
   queryClient.invalidateQueries({ queryKey: queryKeys.imageObjects });
   queryClient.invalidateQueries({ queryKey: queryKeys.areas });
   queryClient.invalidateQueries({ queryKey: queryKeys.renderModel });
@@ -78,7 +78,8 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     let createdSelectionId: string | null = null;
     let clearActiveSelection = false;
     if (LAYER_COMMAND_IDS.has(id)) {
-      const resolved = resolveLayerParams(id, parameters, useUIStore.getState().selectedLayerId);
+      const ui = useUIStore.getState();
+      const resolved = resolveLayerParams(id, parameters, ui.selectedLayerId, ui.selectedAreaId);
       runParams = resolved.parameters;
       createdLayerId = resolved.createdId;
     } else if (IMAGE_COMMAND_IDS.has(id)) {
@@ -92,7 +93,8 @@ export const useCommandStore = create<CommandState>((set, get) => ({
       runParams = resolved.parameters;
       createdAreaId = resolved.createdAreaId;
     } else if (SELECTION_COMMAND_IDS.has(id)) {
-      const resolved = resolveSelectionParams(id, parameters, useUIStore.getState().activeSelectionId);
+      const ui = useUIStore.getState();
+      const resolved = resolveSelectionParams(id, parameters, ui.activeSelectionId, ui.selectedAreaId);
       runParams = resolved.parameters;
       createdSelectionId = resolved.createdSelectionId;
       createdLayerId = resolved.createdLayerId;

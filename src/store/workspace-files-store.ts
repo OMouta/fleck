@@ -38,7 +38,7 @@ type WorkspaceFilesState = {
 /** Refresh everything that depends on the loaded document. */
 function invalidateDocument() {
   queryClient.invalidateQueries({ queryKey: queryKeys.workspaceMeta });
-  queryClient.invalidateQueries({ queryKey: queryKeys.layers });
+  queryClient.invalidateQueries({ queryKey: ["document", "layers"] });
   queryClient.invalidateQueries({ queryKey: queryKeys.imageObjects });
   queryClient.invalidateQueries({ queryKey: queryKeys.areas });
   queryClient.invalidateQueries({ queryKey: queryKeys.history });

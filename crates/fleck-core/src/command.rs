@@ -532,6 +532,7 @@ fn register_layer_commands(registry: &mut CommandRegistry) -> Result<(), Command
         &["new layer", "add layer"],
         None,
         vec![
+            prompt("area_id", "Area ID", ParameterKind::ObjectId, true),
             prompt("id", "Layer ID", ParameterKind::ObjectId, true),
             prompt("name", "Name", ParameterKind::String, true),
             prompt("x", "X", ParameterKind::Number, false),
@@ -541,6 +542,7 @@ fn register_layer_commands(registry: &mut CommandRegistry) -> Result<(), Command
         ],
         |workspace, invocation, runtime| {
             runtime.ensure_not_cancelled()?;
+            let area_id = required_object_id(&invocation.parameters, "area_id")?;
             let id = required_object_id(&invocation.parameters, "id")?;
             let name = invocation.parameters.required_string("name")?.to_owned();
             let x = invocation.parameters.optional_f32("x", 0.0)?;
@@ -550,6 +552,7 @@ fn register_layer_commands(registry: &mut CommandRegistry) -> Result<(), Command
             layer::create_layer(
                 workspace,
                 NewLayer {
+                    area_id,
                     id,
                     name: name.clone(),
                     position: Point { x, y },
@@ -798,16 +801,20 @@ fn register_layer_commands(registry: &mut CommandRegistry) -> Result<(), Command
         "Flatten visible unlocked layers into a single raster layer.",
         &["flatten image"],
         None,
-        vec![prompt(
-            "flattened_id",
-            "Flattened Layer ID",
-            ParameterKind::ObjectId,
-            true,
-        )],
+        vec![
+            prompt("area_id", "Area ID", ParameterKind::ObjectId, true),
+            prompt(
+                "flattened_id",
+                "Flattened Layer ID",
+                ParameterKind::ObjectId,
+                true,
+            ),
+        ],
         |workspace, invocation, runtime| {
             runtime.ensure_not_cancelled()?;
             let flattened_id = required_object_id(&invocation.parameters, "flattened_id")?;
-            layer::flatten_visible_layers(workspace, flattened_id)?;
+            let area_id = required_object_id(&invocation.parameters, "area_id")?;
+            layer::flatten_visible_layers(workspace, &area_id, flattened_id)?;
             Ok(CommandEffect::undoable("Flatten Visible Layers"))
         },
     )?;
@@ -1280,6 +1287,7 @@ fn register_selection_commands(registry: &mut CommandRegistry) -> Result<(), Com
         None,
         vec![
             prompt("id", "Selection ID", ParameterKind::ObjectId, true),
+            prompt("area_id", "Area ID", ParameterKind::ObjectId, true),
             prompt("layer_id", "Layer ID", ParameterKind::ObjectId, true),
             prompt("name", "Name", ParameterKind::String, true),
         ],
@@ -1289,6 +1297,7 @@ fn register_selection_commands(registry: &mut CommandRegistry) -> Result<(), Com
             selection::layer_from_selection(
                 workspace,
                 &required_object_id(&invocation.parameters, "id")?,
+                required_object_id(&invocation.parameters, "area_id")?,
                 required_object_id(&invocation.parameters, "layer_id")?,
                 invocation.parameters.required_string("name")?.to_owned(),
             )?;
@@ -2371,8 +2380,7 @@ fn source_layer_ids(
     if ids.is_empty() {
         ids.extend(
             workspace
-                .layers
-                .iter()
+                .layers()
                 .filter(|layer| layer.visible && layer.opacity > 0.0)
                 .map(|layer| layer.id.clone()),
         );
@@ -3042,7 +3050,10 @@ fn history_from_entries(entries: &[UndoEntry], current_index: Option<usize>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Asset, AssetSource, ImageAssetMetadata, ImageFormat, Workspace};
+    use crate::model::{
+        Area, Asset, AssetSource, ExportBackground, ImageAssetMetadata, ImageFormat, Padding, Rect,
+        TrimBehavior, Workspace,
+    };
     use image::{ImageBuffer, ImageFormat as CrateImageFormat, Rgba};
     use std::io::Cursor;
 
@@ -3211,6 +3222,7 @@ mod tests {
         let registry = default_command_registry().expect("registry");
         let mut engine = CommandEngine::new();
         let mut workspace = Workspace::empty(id("workspace"));
+        workspace.areas.push(test_area("area"));
 
         engine
             .execute(
@@ -3219,6 +3231,7 @@ mod tests {
                 invocation(
                     "layer.create",
                     vec![
+                        ("area_id", JsonValue::String("area".to_owned())),
                         ("id", JsonValue::String("layer-a".to_owned())),
                         ("name", JsonValue::String("Layer A".to_owned())),
                         ("width", JsonValue::Number(32.0)),
@@ -3243,15 +3256,15 @@ mod tests {
             )
             .expect("set opacity");
 
-        assert_eq!(workspace.layers.len(), 1);
-        assert_eq!(workspace.layers[0].opacity, 0.5);
+        assert_eq!(workspace.layers().count(), 1);
+        assert_eq!(workspace.areas[0].layers[0].opacity, 0.5);
         assert_eq!(workspace.history.entries.len(), 2);
 
         engine.undo(&mut workspace).expect("undo opacity");
-        assert_eq!(workspace.layers[0].opacity, 1.0);
+        assert_eq!(workspace.areas[0].layers[0].opacity, 1.0);
 
         engine.undo(&mut workspace).expect("undo create");
-        assert!(workspace.layers.is_empty());
+        assert!(workspace.layers().next().is_none());
     }
 
     #[test]
@@ -3259,6 +3272,7 @@ mod tests {
         let registry = default_command_registry().expect("registry");
         let mut engine = CommandEngine::new();
         let mut workspace = Workspace::empty(id("workspace"));
+        workspace.areas.push(test_area("area"));
 
         engine
             .execute(
@@ -3267,6 +3281,7 @@ mod tests {
                 invocation(
                     "layer.create",
                     vec![
+                        ("area_id", JsonValue::String("area".to_owned())),
                         ("id", JsonValue::String("locked".to_owned())),
                         ("name", JsonValue::String("Locked".to_owned())),
                     ],
@@ -3306,7 +3321,7 @@ mod tests {
             result,
             Err(CommandError::Layer(LayerError::Locked { .. }))
         ));
-        assert_eq!(workspace.layers[0].name, "Locked");
+        assert_eq!(workspace.areas[0].layers[0].name, "Locked");
     }
 
     #[test]
@@ -3420,7 +3435,7 @@ mod tests {
             .expect("rasterize");
 
         assert_eq!(workspace.image_objects.len(), 2);
-        assert_eq!(workspace.layers.len(), 1);
+        assert_eq!(workspace.layers().count(), 1);
         assert_eq!(workspace.image_objects[0].source_asset_id, id("asset-b"));
         assert_eq!(
             workspace.image_objects[0].position,
@@ -3428,7 +3443,7 @@ mod tests {
         );
 
         engine.undo(&mut workspace).expect("undo rasterize");
-        assert!(workspace.layers.is_empty());
+        assert!(workspace.layers().next().is_none());
         assert_eq!(workspace.image_objects[0].rasterized_layer_id, None);
     }
 
@@ -3505,6 +3520,7 @@ mod tests {
         let registry = default_command_registry().expect("registry");
         let mut engine = CommandEngine::new();
         let mut workspace = Workspace::empty(id("workspace"));
+        workspace.areas.push(test_area("area"));
 
         engine
             .execute(
@@ -3513,6 +3529,7 @@ mod tests {
                 invocation(
                     "layer.create",
                     vec![
+                        ("area_id", JsonValue::String("area".to_owned())),
                         ("id", JsonValue::String("base".to_owned())),
                         ("name", JsonValue::String("Base".to_owned())),
                     ],
@@ -3559,7 +3576,7 @@ mod tests {
                     "selection.area_from_selection",
                     vec![
                         ("id", JsonValue::String("selection".to_owned())),
-                        ("area_id", JsonValue::String("area".to_owned())),
+                        ("area_id", JsonValue::String("selection-area".to_owned())),
                         ("name", JsonValue::String("Area".to_owned())),
                     ],
                 ),
@@ -3568,7 +3585,7 @@ mod tests {
             .expect("area");
 
         assert_eq!(workspace.selections.len(), 1);
-        assert_eq!(workspace.areas[0].bounds.width, 8.0);
+        assert_eq!(workspace.areas[1].bounds.width, 8.0);
         assert!(workspace.selections[0]
             .mask
             .as_ref()
@@ -3578,7 +3595,7 @@ mod tests {
             .any(|alpha| *alpha < 255));
 
         engine.undo(&mut workspace).expect("undo area");
-        assert!(workspace.areas.is_empty());
+        assert_eq!(workspace.areas.len(), 1);
         engine.undo(&mut workspace).expect("undo feather");
         assert!(workspace.selections[0]
             .mask
@@ -3594,6 +3611,7 @@ mod tests {
         let registry = default_command_registry().expect("registry");
         let mut engine = CommandEngine::new();
         let mut workspace = Workspace::empty(id("workspace"));
+        workspace.areas.push(test_area("area"));
 
         engine
             .execute(
@@ -3602,6 +3620,7 @@ mod tests {
                 invocation(
                     "layer.create",
                     vec![
+                        ("area_id", JsonValue::String("area".to_owned())),
                         ("id", JsonValue::String("layer".to_owned())),
                         ("name", JsonValue::String("Layer".to_owned())),
                         ("width", JsonValue::Number(4.0)),
@@ -3637,12 +3656,12 @@ mod tests {
             )
             .expect("brush");
 
-        let painted_alpha = workspace.layers[0].raster.as_ref().expect("raster").pixels
+        let painted_alpha = workspace.areas[0].layers[0].raster.as_ref().expect("raster").pixels
             [((1 * 4 + 1) * 4 + 3) as usize];
         assert_eq!(painted_alpha, 255);
 
         engine.undo(&mut workspace).expect("undo brush");
-        assert!(workspace.layers[0]
+        assert!(workspace.areas[0].layers[0]
             .raster
             .as_ref()
             .expect("raster")
@@ -3676,6 +3695,28 @@ mod tests {
 
     fn id(value: &str) -> ObjectId {
         ObjectId::new(value).expect("test id should be valid")
+    }
+
+    fn test_area(value: &str) -> Area {
+        Area {
+            id: id(value),
+            name: value.to_owned(),
+            bounds: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 64.0,
+                height: 64.0,
+            },
+            layers: Vec::new(),
+            padding: Padding::default(),
+            background: ExportBackground::Transparent,
+            trim: TrimBehavior::None,
+            output_ids: Vec::new(),
+            included_layer_ids: Vec::new(),
+            excluded_layer_ids: Vec::new(),
+            tags: Vec::new(),
+            preset_id: None,
+        }
     }
 
     fn asset(value: &str) -> Asset {

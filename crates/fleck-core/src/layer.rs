@@ -5,6 +5,7 @@ use crate::model::{
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewLayer {
+    pub area_id: ObjectId,
     pub id: ObjectId,
     pub name: String,
     pub bounds: Rect,
@@ -35,7 +36,8 @@ pub fn create_layer(workspace: &mut Workspace, new_layer: NewLayer) -> LayerResu
         return Err(LayerError::NonPositiveBounds);
     }
 
-    workspace.layers.push(Layer {
+    let area = require_area_mut(workspace, &new_layer.area_id)?;
+    area.layers.push(Layer {
         id: new_layer.id,
         name: new_layer.name,
         visible: true,
@@ -59,9 +61,9 @@ pub fn create_layer(workspace: &mut Workspace, new_layer: NewLayer) -> LayerResu
 }
 
 pub fn delete_layer(workspace: &mut Workspace, id: &ObjectId) -> LayerResult<Layer> {
-    let index = require_layer_index(workspace, id)?;
-    ensure_unlocked(&workspace.layers[index])?;
-    Ok(workspace.layers.remove(index))
+    let (area_index, layer_index) = require_layer_location(workspace, id)?;
+    ensure_unlocked(&workspace.areas[area_index].layers[layer_index])?;
+    Ok(workspace.areas[area_index].layers.remove(layer_index))
 }
 
 pub fn duplicate_layer(
@@ -70,11 +72,13 @@ pub fn duplicate_layer(
     new_id: ObjectId,
 ) -> LayerResult<()> {
     ensure_unique_layer_id(workspace, &new_id)?;
-    let index = require_layer_index(workspace, id)?;
-    let mut duplicate = workspace.layers[index].clone();
+    let (area_index, layer_index) = require_layer_location(workspace, id)?;
+    let mut duplicate = workspace.areas[area_index].layers[layer_index].clone();
     duplicate.id = new_id;
     duplicate.name = format!("{} Copy", duplicate.name);
-    workspace.layers.insert(index + 1, duplicate);
+    workspace.areas[area_index]
+        .layers
+        .insert(layer_index + 1, duplicate);
     Ok(())
 }
 
@@ -90,13 +94,13 @@ pub fn reorder_layer(
     id: &ObjectId,
     new_index: usize,
 ) -> LayerResult<()> {
-    let index = require_layer_index(workspace, id)?;
-    if new_index >= workspace.layers.len() {
+    let (area_index, layer_index) = require_layer_location(workspace, id)?;
+    if new_index >= workspace.areas[area_index].layers.len() {
         return Err(LayerError::IndexOutOfRange { index: new_index });
     }
-    ensure_unlocked(&workspace.layers[index])?;
-    let layer = workspace.layers.remove(index);
-    workspace.layers.insert(new_index, layer);
+    ensure_unlocked(&workspace.areas[area_index].layers[layer_index])?;
+    let layer = workspace.areas[area_index].layers.remove(layer_index);
+    workspace.areas[area_index].layers.insert(new_index, layer);
     Ok(())
 }
 
@@ -209,18 +213,18 @@ pub fn trim_to_visible_pixels(workspace: &mut Workspace, id: &ObjectId) -> Layer
 }
 
 pub fn merge_down(workspace: &mut Workspace, id: &ObjectId) -> LayerResult<()> {
-    let source_index = require_layer_index(workspace, id)?;
+    let (area_index, source_index) = require_layer_location(workspace, id)?;
     if source_index == 0 {
         return Err(LayerError::IndexOutOfRange {
             index: source_index,
         });
     }
     let target_index = source_index - 1;
-    ensure_unlocked(&workspace.layers[source_index])?;
-    ensure_unlocked(&workspace.layers[target_index])?;
+    ensure_unlocked(&workspace.areas[area_index].layers[source_index])?;
+    ensure_unlocked(&workspace.areas[area_index].layers[target_index])?;
 
-    let source = workspace.layers.remove(source_index);
-    let target = &mut workspace.layers[target_index];
+    let source = workspace.areas[area_index].layers.remove(source_index);
+    let target = &mut workspace.areas[area_index].layers[target_index];
     target.bounds = union_layer_bounds(target, &source);
     target.position = Point::ZERO;
     target.name = format!("Merged {}", target.name);
@@ -232,10 +236,12 @@ pub fn merge_down(workspace: &mut Workspace, id: &ObjectId) -> LayerResult<()> {
 
 pub fn flatten_visible_layers(
     workspace: &mut Workspace,
+    area_id: &ObjectId,
     flattened_id: ObjectId,
 ) -> LayerResult<()> {
     ensure_unique_layer_id(workspace, &flattened_id)?;
-    let visible_layers = workspace
+    let area_index = require_area_index(workspace, area_id)?;
+    let visible_layers = workspace.areas[area_index]
         .layers
         .iter()
         .filter(|layer| layer.visible && layer.opacity > 0.0)
@@ -254,10 +260,10 @@ pub fn flatten_visible_layers(
         .fold(layer_workspace_rect(&visible_layers[0]), |bounds, layer| {
             union_rect(bounds, layer_workspace_rect(layer))
         });
-    workspace
+    workspace.areas[area_index]
         .layers
         .retain(|layer| !layer.visible || layer.opacity <= 0.0);
-    workspace.layers.push(Layer {
+    workspace.areas[area_index].layers.push(Layer {
         id: flattened_id,
         name: "Flattened Layers".to_owned(),
         visible: true,
@@ -289,8 +295,7 @@ fn transparent_raster(width: f32, height: f32) -> RasterPixels {
 
 fn require_layer<'a>(workspace: &'a Workspace, id: &ObjectId) -> LayerResult<&'a Layer> {
     workspace
-        .layers
-        .iter()
+        .layers()
         .find(|layer| layer.id == *id)
         .ok_or_else(|| LayerError::NotFound { id: id.clone() })
 }
@@ -300,26 +305,50 @@ fn require_layer_mut<'a>(
     id: &ObjectId,
 ) -> LayerResult<&'a mut Layer> {
     workspace
-        .layers
-        .iter_mut()
+        .layers_mut()
         .find(|layer| layer.id == *id)
         .ok_or_else(|| LayerError::NotFound { id: id.clone() })
 }
 
-fn require_layer_index(workspace: &Workspace, id: &ObjectId) -> LayerResult<usize> {
+fn require_layer_location(workspace: &Workspace, id: &ObjectId) -> LayerResult<(usize, usize)> {
     workspace
-        .layers
+        .areas
         .iter()
-        .position(|layer| layer.id == *id)
+        .enumerate()
+        .find_map(|(area_index, area)| {
+            area.layers
+                .iter()
+                .position(|layer| layer.id == *id)
+                .map(|layer_index| (area_index, layer_index))
+        })
         .ok_or_else(|| LayerError::NotFound { id: id.clone() })
 }
 
 fn ensure_unique_layer_id(workspace: &Workspace, id: &ObjectId) -> LayerResult<()> {
-    if workspace.layers.iter().any(|layer| layer.id == *id) {
+    if workspace.layers().any(|layer| layer.id == *id) {
         Err(LayerError::DuplicateId { id: id.clone() })
     } else {
         Ok(())
     }
+}
+
+fn require_area_mut<'a>(
+    workspace: &'a mut Workspace,
+    id: &ObjectId,
+) -> LayerResult<&'a mut crate::model::Area> {
+    workspace
+        .areas
+        .iter_mut()
+        .find(|area| area.id == *id)
+        .ok_or_else(|| LayerError::NotFound { id: id.clone() })
+}
+
+fn require_area_index(workspace: &Workspace, id: &ObjectId) -> LayerResult<usize> {
+    workspace
+        .areas
+        .iter()
+        .position(|area| area.id == *id)
+        .ok_or_else(|| LayerError::NotFound { id: id.clone() })
 }
 
 fn ensure_unlocked(layer: &Layer) -> LayerResult<()> {
@@ -361,6 +390,7 @@ fn union_rect(a: Rect, b: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{Area, ExportBackground, Padding, TrimBehavior};
 
     #[test]
     fn create_delete_duplicate_and_reorder_layers() {
@@ -369,12 +399,12 @@ mod tests {
         duplicate_layer(&mut workspace, &id("base"), id("copy")).expect("duplicate");
         reorder_layer(&mut workspace, &id("copy"), 0).expect("reorder");
 
-        assert_eq!(workspace.layers[0].id, id("copy"));
-        assert_eq!(workspace.layers[1].id, id("base"));
+        assert_eq!(workspace.areas[0].layers[0].id, id("copy"));
+        assert_eq!(workspace.areas[0].layers[1].id, id("base"));
 
         let deleted = delete_layer(&mut workspace, &id("copy")).expect("delete");
         assert_eq!(deleted.id, id("copy"));
-        assert_eq!(workspace.layers.len(), 1);
+        assert_eq!(workspace.layers().count(), 1);
     }
 
     #[test]
@@ -419,22 +449,43 @@ mod tests {
         create_layer(&mut workspace, right).expect("right");
 
         merge_down(&mut workspace, &id("right")).expect("merge down");
-        assert_eq!(workspace.layers.len(), 1);
-        assert_eq!(workspace.layers[0].bounds.width, 24.0);
+        assert_eq!(workspace.layers().count(), 1);
+        assert_eq!(workspace.areas[0].layers[0].bounds.width, 24.0);
 
         duplicate_layer(&mut workspace, &id("left"), id("copy")).expect("duplicate");
-        flatten_visible_layers(&mut workspace, id("flat")).expect("flatten");
+        flatten_visible_layers(&mut workspace, &id("area"), id("flat")).expect("flatten");
 
-        assert_eq!(workspace.layers.len(), 1);
-        assert_eq!(workspace.layers[0].id, id("flat"));
+        assert_eq!(workspace.layers().count(), 1);
+        assert_eq!(workspace.areas[0].layers[0].id, id("flat"));
     }
 
     fn workspace() -> Workspace {
-        Workspace::empty(id("workspace"))
+        let mut workspace = Workspace::empty(id("workspace"));
+        workspace.areas.push(Area {
+            id: id("area"),
+            name: "Area".to_owned(),
+            bounds: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 64.0,
+                height: 64.0,
+            },
+            layers: Vec::new(),
+            padding: Padding::default(),
+            background: ExportBackground::Transparent,
+            trim: TrimBehavior::None,
+            output_ids: Vec::new(),
+            included_layer_ids: Vec::new(),
+            excluded_layer_ids: Vec::new(),
+            tags: Vec::new(),
+            preset_id: None,
+        });
+        workspace
     }
 
     fn new_layer(value: &str) -> NewLayer {
         NewLayer {
+            area_id: id("area"),
             id: id(value),
             name: value.to_owned(),
             bounds: Rect {

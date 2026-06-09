@@ -49,6 +49,7 @@ export function resolveLayerParams(
   commandId: string,
   parameters: Record<string, unknown>,
   selectedId: string | null,
+  selectedAreaId: string | null,
 ): { parameters: Record<string, unknown>; createdId: string | null } {
   const p: Record<string, unknown> = { ...parameters };
   let createdId: string | null = null;
@@ -59,6 +60,7 @@ export function resolveLayerParams(
 
   switch (commandId) {
     case "layer.create": {
+      if (p.area_id == null && selectedAreaId) p.area_id = selectedAreaId;
       if (p.id == null) p.id = newObjectId("layer");
       if (p.name == null) p.name = "New layer";
       createdId = p.id as string;
@@ -76,6 +78,7 @@ export function resolveLayerParams(
       break;
     }
     case "layer.flatten": {
+      if (p.area_id == null && selectedAreaId) p.area_id = selectedAreaId;
       if (p.flattened_id == null) p.flattened_id = newObjectId("layer");
       createdId = p.flattened_id as string;
       break;

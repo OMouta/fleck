@@ -382,16 +382,21 @@ pub fn get_workspace_meta(
     })
 }
 
-#[tauri::command]
-pub fn get_layers(state: tauri::State<'_, DesktopState>) -> Result<Vec<LayerDto>, String> {
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_layers(
+    state: tauri::State<'_, DesktopState>,
+    area_id: Option<String>,
+) -> Result<Vec<LayerDto>, String> {
     with_document(&state, |document| {
-        Ok(document
-            .package
-            .workspace
-            .layers
-            .iter()
-            .map(layer_dto)
-            .collect())
+        let workspace = &document.package.workspace;
+        let Some(area_id) = area_id else {
+            return Ok(Vec::new());
+        };
+        let area_id = ObjectId::new(area_id).map_err(|error| error.to_string())?;
+        let Some(area) = workspace.areas.iter().find(|area| area.id == area_id) else {
+            return Ok(Vec::new());
+        };
+        Ok(area.layers.iter().map(layer_dto).collect())
     })
 }
 
@@ -704,6 +709,7 @@ pub fn create_area(state: tauri::State<'_, DesktopState>) -> Result<(), String> 
         id,
         name: "export".to_owned(),
         bounds: default_canvas_rect(workspace),
+            layers: Vec::new(),
         padding: Default::default(),
         background: ExportBackground::Transparent,
         trim: fleck_core::model::TrimBehavior::None,
@@ -1012,7 +1018,7 @@ fn workspace_meta(workspace: &Workspace, path: Option<&Path>, dirty: bool) -> Wo
             .map(file_name)
             .unwrap_or_else(|| workspace.metadata.name.clone()),
         dirty,
-        layer_count: workspace.layers.len(),
+        layer_count: workspace.layers().count(),
         selected_count: workspace.selections.len(),
         canvas_size: format!("{} × {} px", bounds.width.round(), bounds.height.round()),
     }
@@ -1326,8 +1332,7 @@ fn render_model(package: &WorkspacePackage, has_document: bool) -> RenderModelDt
             height: bounds.height,
         },
         layers: workspace
-            .layers
-            .iter()
+            .layers()
             .enumerate()
             .map(|(index, layer)| RenderLayerDto {
                 id: layer.id.as_str().to_owned(),
@@ -1345,7 +1350,7 @@ fn render_model(package: &WorkspacePackage, has_document: bool) -> RenderModelDt
                     .map(|(index, object)| RenderLayerDto {
                         id: object.id.as_str().to_owned(),
                         rect: rect_dto(image_object_rect(object)),
-                        color: render_color(index + workspace.layers.len()),
+                        color: render_color(index + workspace.layers().count()),
                         opacity: object.opacity,
                         visible: true,
                         image_src: image_object_source(package, object),
@@ -1409,8 +1414,7 @@ fn default_canvas_rect(workspace: &Workspace) -> Rect {
 
 fn content_canvas_rect(workspace: &Workspace) -> Option<Rect> {
     workspace
-        .layers
-        .iter()
+        .layers()
         .map(layer_workspace_rect)
         .chain(workspace.image_objects.iter().map(image_object_rect))
         .reduce(union_rect)

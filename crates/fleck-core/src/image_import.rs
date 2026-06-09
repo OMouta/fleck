@@ -1,7 +1,7 @@
 use crate::layer::{self, NewLayer};
 use crate::model::{
-    Asset, AssetSource, ExportParticipation, ImageAssetMetadata, ImageFormat, ImageObject,
-    ObjectId, Point, Rect, Size, Workspace,
+    Area, Asset, AssetSource, ExportBackground, ExportParticipation, ImageAssetMetadata,
+    ImageFormat, ImageObject, ObjectId, Padding, Point, Rect, Size, TrimBehavior, Workspace,
 };
 use crate::persistence::{EmbeddedAssetBlob, WorkspacePackage};
 use image::GenericImageView;
@@ -242,9 +242,11 @@ pub fn rasterize_image_object(
 ) -> ImageImportResult<()> {
     let object = require_object(workspace, object_id)?.clone();
     let asset = require_asset(workspace, &object.source_asset_id)?;
+    let metadata = asset.image_metadata.clone();
+    let object_rect = image_object_rect(&object);
+    let area_id = raster_target_area_id(workspace, object_rect, &object.name);
     let bounds = object.crop_bounds.unwrap_or_else(|| {
-        asset
-            .image_metadata
+        metadata
             .as_ref()
             .map(|metadata| Rect {
                 x: 0.0,
@@ -263,6 +265,7 @@ pub fn rasterize_image_object(
     layer::create_layer(
         workspace,
         NewLayer {
+            area_id,
             id: layer_id.clone(),
             name: object.name.clone(),
             bounds: Rect {
@@ -277,6 +280,46 @@ pub fn rasterize_image_object(
     let image_object = require_object_mut(workspace, object_id)?;
     image_object.rasterized_layer_id = Some(layer_id);
     Ok(())
+}
+
+fn raster_target_area_id(workspace: &mut Workspace, rect: Rect, name: &str) -> ObjectId {
+    if let Some(area) = workspace
+        .areas
+        .iter()
+        .find(|area| rects_intersect(area.bounds, rect))
+    {
+        return area.id.clone();
+    }
+    let id = ObjectId::new(format!("area-{}", workspace.areas.len() + 1))
+        .expect("generated area id should be valid");
+    workspace.areas.push(Area {
+        id: id.clone(),
+        name: format!("{name} Area"),
+        bounds: rect,
+        layers: Vec::new(),
+        padding: Padding::default(),
+        background: ExportBackground::Transparent,
+        trim: TrimBehavior::None,
+        output_ids: Vec::new(),
+        included_layer_ids: Vec::new(),
+        excluded_layer_ids: Vec::new(),
+        tags: Vec::new(),
+        preset_id: None,
+    });
+    id
+}
+
+fn image_object_rect(object: &ImageObject) -> Rect {
+    Rect {
+        x: object.position.x,
+        y: object.position.y,
+        width: object.scale.width,
+        height: object.scale.height,
+    }
+}
+
+fn rects_intersect(a: Rect, b: Rect) -> bool {
+    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 }
 
 /// Decode `bytes` and register them as an embedded asset on `package`, without
@@ -541,7 +584,7 @@ mod tests {
         assert_eq!(object.rotation_degrees, 15.0);
         assert_eq!(object.rasterized_layer_id, Some(id("layer")));
         assert_eq!(workspace.image_objects.len(), 2);
-        assert_eq!(workspace.layers.len(), 1);
+        assert_eq!(workspace.layers().count(), 1);
     }
 
     fn workspace() -> Workspace {

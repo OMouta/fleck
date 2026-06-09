@@ -53,7 +53,7 @@ async function call<T>(command: string, args: Record<string, unknown> = {}): Pro
 
 export const api = {
   getWorkspaceMeta: () => call<WorkspaceMeta>("get_workspace_meta"),
-  getLayers: () => call<Layer[]>("get_layers"),
+  getLayers: (areaId?: string | null) => call<Layer[]>("get_layers", { areaId: areaId ?? null }),
   getImageObjects: () => call<ImageObject[]>("get_image_objects"),
   getAreas: () => call<Area[]>("get_areas"),
   getHistory: () => call<HistoryState>("get_history"),

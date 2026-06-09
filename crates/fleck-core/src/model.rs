@@ -36,7 +36,6 @@ pub struct Workspace {
     pub id: ObjectId,
     pub metadata: WorkspaceMetadata,
     pub canvas: CanvasSettings,
-    pub layers: Vec<Layer>,
     pub image_objects: Vec<ImageObject>,
     pub selections: Vec<Selection>,
     pub guides: Vec<Guide>,
@@ -56,7 +55,6 @@ impl Workspace {
             id,
             metadata: WorkspaceMetadata::default(),
             canvas: CanvasSettings::default(),
-            layers: Vec::new(),
             image_objects: Vec::new(),
             selections: Vec::new(),
             guides: Vec::new(),
@@ -70,6 +68,16 @@ impl Workspace {
         }
     }
 
+    pub fn layers(&self) -> impl Iterator<Item = &Layer> {
+        self.areas.iter().flat_map(|area| area.layers.iter())
+    }
+
+    pub fn layers_mut(&mut self) -> impl Iterator<Item = &mut Layer> {
+        self.areas
+            .iter_mut()
+            .flat_map(|area| area.layers.iter_mut())
+    }
+
     pub fn validate(&self) -> Result<(), ValidationError> {
         let mut issues = Vec::new();
 
@@ -79,11 +87,7 @@ impl Workspace {
             });
         }
 
-        collect_duplicate_ids(
-            &mut issues,
-            "layer",
-            self.layers.iter().map(|layer| &layer.id),
-        );
+        collect_duplicate_ids(&mut issues, "layer", self.layers().map(|layer| &layer.id));
         collect_duplicate_ids(
             &mut issues,
             "image_object",
@@ -125,11 +129,7 @@ impl Workspace {
             self.object_groups.iter().map(|group| &group.id),
         );
 
-        let layer_ids = self
-            .layers
-            .iter()
-            .map(|layer| &layer.id)
-            .collect::<HashSet<_>>();
+        let layer_ids = self.layers().map(|layer| &layer.id).collect::<HashSet<_>>();
         let asset_ids = self
             .assets
             .iter()
@@ -141,7 +141,7 @@ impl Workspace {
             .map(|output| &output.id)
             .collect::<HashSet<_>>();
 
-        for layer in &self.layers {
+        for layer in self.layers() {
             if !(0.0..=1.0).contains(&layer.opacity) {
                 issues.push(ValidationIssue::OpacityOutOfRange {
                     object_kind: "layer",
@@ -382,6 +382,7 @@ pub struct Area {
     pub id: ObjectId,
     pub name: String,
     pub bounds: Rect,
+    pub layers: Vec<Layer>,
     pub padding: Padding,
     pub background: ExportBackground,
     pub trim: TrimBehavior,
@@ -865,8 +866,9 @@ mod tests {
     #[test]
     fn duplicate_ids_are_rejected() {
         let mut workspace = Workspace::empty(id("workspace"));
-        workspace.layers.push(layer("same"));
-        workspace.layers.push(layer("same"));
+        workspace.areas.push(area("area"));
+        workspace.areas[0].layers.push(layer("same"));
+        workspace.areas[0].layers.push(layer("same"));
 
         let error = workspace
             .validate()
@@ -950,6 +952,7 @@ mod tests {
     fn populated_workspace() -> Workspace {
         let mut workspace = Workspace::empty(id("workspace"));
         workspace.metadata.name = "Asset Sheet".to_owned();
+        workspace.areas.push(area("export-logo"));
         workspace.assets.push(Asset {
             id: id("asset-logo"),
             name: "logo.png".to_owned(),
@@ -960,7 +963,7 @@ mod tests {
             color_profile: Some("sRGB".to_owned()),
             image_metadata: None,
         });
-        workspace.layers.push(layer("layer-logo"));
+        workspace.areas[0].layers.push(layer("layer-logo"));
         workspace.image_objects.push(ImageObject {
             id: id("image-logo"),
             name: "Placed Logo".to_owned(),
@@ -1011,10 +1014,12 @@ mod tests {
             transparency: TransparencyBehavior::Preserve,
             metadata: MetadataBehavior::Strip,
         });
-        workspace.areas.push(Area {
+        let layers = std::mem::take(&mut workspace.areas[0].layers);
+        workspace.areas[0] = Area {
             id: id("export-logo"),
             name: "logo".to_owned(),
             bounds: rect(0.0, 0.0, 64.0, 64.0),
+            layers,
             padding: Padding::default(),
             background: ExportBackground::Transparent,
             trim: TrimBehavior::None,
@@ -1023,7 +1028,7 @@ mod tests {
             excluded_layer_ids: Vec::new(),
             tags: vec!["brand".to_owned()],
             preset_id: None,
-        });
+        };
         workspace.recipes.push(Recipe {
             id: id("recipe-favicon"),
             name: "Favicon".to_owned(),
@@ -1064,6 +1069,23 @@ mod tests {
             group_id: None,
             export_participation: ExportParticipation::Included,
             raster: None,
+        }
+    }
+
+    fn area(value: &str) -> Area {
+        Area {
+            id: id(value),
+            name: value.to_owned(),
+            bounds: rect(0.0, 0.0, 64.0, 64.0),
+            layers: Vec::new(),
+            padding: Padding::default(),
+            background: ExportBackground::Transparent,
+            trim: TrimBehavior::None,
+            output_ids: Vec::new(),
+            included_layer_ids: Vec::new(),
+            excluded_layer_ids: Vec::new(),
+            tags: Vec::new(),
+            preset_id: None,
         }
     }
 

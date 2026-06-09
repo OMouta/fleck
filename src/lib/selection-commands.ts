@@ -81,6 +81,7 @@ export function resolveSelectionParams(
   commandId: string,
   parameters: Record<string, unknown>,
   activeSelectionId: string | null,
+  selectedAreaId: string | null,
 ): SelectionResolution {
   const p: Record<string, unknown> = { ...parameters };
   let createdSelectionId: string | null = null;
@@ -95,6 +96,7 @@ export function resolveSelectionParams(
   }
 
   if (commandId === "selection.layer_from_selection") {
+    if (p.area_id == null && selectedAreaId) p.area_id = selectedAreaId;
     if (p.layer_id == null) p.layer_id = newSelectionChildId("layer");
     if (p.name == null) p.name = "Selection layer";
     createdLayerId = p.layer_id as string;
