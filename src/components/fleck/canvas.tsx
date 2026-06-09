@@ -112,7 +112,10 @@ export function Canvas() {
   const togglePixelGrid = useViewportStore((s) => s.togglePixelGrid);
 
   const { data: model } = useRenderModel();
-  const isEmpty = !model || (model.canvas.width <= 0 && model.layers.length === 0);
+  const isEmpty =
+    !model ||
+    !model.hasDocument ||
+    (model.canvas.width <= 0 && model.layers.length === 0 && model.exportAreas.length === 0);
 
   const [spaceHeld, setSpaceHeld] = useState(false);
 

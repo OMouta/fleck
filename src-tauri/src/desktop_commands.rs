@@ -74,6 +74,7 @@ struct DocumentState {
     path: Option<PathBuf>,
     engine: CommandEngine,
     dirty: bool,
+    has_document: bool,
     /// Cache of the most recent export job's encoded outputs, indexed by the
     /// `filename` we use as the output id in the frontend `ExportResult`.
     /// Used by `copy_export_result` so we don't re-run the pipeline to copy.
@@ -87,7 +88,15 @@ impl DocumentState {
             path: None,
             engine: CommandEngine::new(),
             dirty: false,
+            has_document: false,
             last_export: Vec::new(),
+        }
+    }
+
+    fn new_workspace() -> Self {
+        Self {
+            has_document: true,
+            ..Self::new_empty()
         }
     }
 }
@@ -274,6 +283,7 @@ pub struct RecentFileDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RenderModelDto {
+    has_document: bool,
     canvas: CanvasDto,
     layers: Vec<RenderLayerDto>,
     export_areas: Vec<RenderExportAreaDto>,
@@ -431,7 +441,7 @@ pub fn get_commands() -> Result<Vec<CommandDefinitionDto>, String> {
 #[tauri::command]
 pub fn new_workspace(state: tauri::State<'_, DesktopState>) -> Result<(), String> {
     let mut document = state.inner.lock().map_err(|_| "document lock poisoned")?;
-    *document = DocumentState::new_empty();
+    *document = DocumentState::new_workspace();
     Ok(())
 }
 
@@ -639,7 +649,9 @@ pub fn relink_asset(state: tauri::State<'_, DesktopState>, asset_id: String) -> 
 
 #[tauri::command]
 pub fn get_render_model(state: tauri::State<'_, DesktopState>) -> Result<RenderModelDto, String> {
-    with_document(&state, |document| Ok(render_model(&document.package)))
+    with_document(&state, |document| {
+        Ok(render_model(&document.package, document.has_document))
+    })
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -881,6 +893,7 @@ pub fn run_command(
         .map_err(|error| error.to_string());
     document.package.workspace = workspace;
     if execution.is_ok() {
+        document.has_document = true;
         document.dirty = true;
     }
     execution.map(|execution| CommandExecutionDto {
@@ -973,6 +986,7 @@ fn open_workspace_path_inner(
     document.path = Some(path.clone());
     document.engine = CommandEngine::new();
     document.dirty = false;
+    document.has_document = true;
     drop(document);
     push_recent_file(&path);
     Ok(result)
@@ -987,7 +1001,12 @@ fn with_document<T>(
 }
 
 fn workspace_meta(workspace: &Workspace, path: Option<&Path>, dirty: bool) -> WorkspaceMetaDto {
-    let bounds = default_canvas_rect(workspace);
+    let bounds = content_canvas_rect(workspace).unwrap_or(Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 0.0,
+        height: 0.0,
+    });
     WorkspaceMetaDto {
         name: path
             .map(file_name)
@@ -1292,10 +1311,16 @@ fn command_definition_dto(
     }
 }
 
-fn render_model(package: &WorkspacePackage) -> RenderModelDto {
+fn render_model(package: &WorkspacePackage, has_document: bool) -> RenderModelDto {
     let workspace = &package.workspace;
-    let bounds = default_canvas_rect(workspace);
+    let bounds = content_canvas_rect(workspace).unwrap_or(Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 0.0,
+        height: 0.0,
+    });
     RenderModelDto {
+        has_document,
         canvas: CanvasDto {
             width: bounds.width,
             height: bounds.height,
@@ -1374,18 +1399,21 @@ fn render_model(package: &WorkspacePackage) -> RenderModelDto {
 }
 
 fn default_canvas_rect(workspace: &Workspace) -> Rect {
+    content_canvas_rect(workspace).unwrap_or(Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 1024.0,
+        height: 768.0,
+    })
+}
+
+fn content_canvas_rect(workspace: &Workspace) -> Option<Rect> {
     workspace
         .layers
         .iter()
         .map(layer_workspace_rect)
         .chain(workspace.image_objects.iter().map(image_object_rect))
         .reduce(union_rect)
-        .unwrap_or(Rect {
-            x: 0.0,
-            y: 0.0,
-            width: 1024.0,
-            height: 768.0,
-        })
 }
 
 fn image_object_rect(object: &ImageObject) -> Rect {
@@ -1525,6 +1553,7 @@ fn register_acquired_asset(
         bytes,
     )
     .map_err(|error| error.to_string())?;
+    document.has_document = true;
     document.dirty = true;
     Ok(AcquiredAssetDto {
         asset_id: asset_id.as_str().to_owned(),

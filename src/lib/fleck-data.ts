@@ -73,6 +73,7 @@ export type ViewportFocusKind = "fit" | "selection" | "export-area" | "actual" |
  * applies the viewport transform and paints it.
  */
 export type RenderModel = {
+  hasDocument: boolean;
   canvas: { width: number; height: number };
   layers: {
     id: string;
