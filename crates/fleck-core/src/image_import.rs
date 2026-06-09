@@ -1,7 +1,8 @@
-use crate::layer::{self, NewLayer};
+use crate::layer;
 use crate::model::{
-    Area, Asset, AssetSource, ExportBackground, ExportParticipation, ImageAssetMetadata,
-    ImageFormat, ImageObject, ObjectId, Padding, Point, Rect, Size, TrimBehavior, Workspace,
+    Area, Asset, AssetSource, BlendMode, ClippingBehavior, ExportBackground, ExportParticipation,
+    ImageAssetMetadata, ImageFormat, ImageObject, Layer, ObjectId, Padding, Point, RasterPixels,
+    Rect, Size, Transform, TrimBehavior, Workspace,
 };
 use crate::persistence::{EmbeddedAssetBlob, WorkspacePackage};
 use image::GenericImageView;
@@ -87,6 +88,8 @@ pub enum ImageImportError {
     Decode(#[from] image::ImageError),
     #[error("failed to read image source")]
     Io(#[from] std::io::Error),
+    #[error("embedded image bytes are not available to the workspace-only rasterizer")]
+    EmbeddedBytesUnavailable,
     #[error("layer operation failed")]
     Layer(#[from] layer::LayerError),
     #[error("image object `{object_id}` references missing asset `{asset_id}`")]
@@ -242,53 +245,41 @@ pub fn rasterize_image_object(
 ) -> ImageImportResult<()> {
     let object = require_object(workspace, object_id)?.clone();
     let asset = require_asset(workspace, &object.source_asset_id)?;
-    let metadata = asset.image_metadata.clone();
+    let decoded = decoded_pixels_for_asset(asset)?;
     let object_rect = image_object_rect(&object);
-    let area_id = raster_target_area_id(workspace, object_rect, &object.name);
-    let bounds = object.crop_bounds.unwrap_or_else(|| {
-        metadata
-            .as_ref()
-            .map(|metadata| Rect {
-                x: 0.0,
-                y: 0.0,
-                width: metadata.width as f32,
-                height: metadata.height as f32,
-            })
-            .unwrap_or(Rect {
-                x: 0.0,
-                y: 0.0,
-                width: object.scale.width,
-                height: object.scale.height,
-            })
-    });
+    ensure_raster_target_areas(workspace, object_rect, &object.name);
 
-    layer::create_layer(
-        workspace,
-        NewLayer {
-            area_id,
-            id: layer_id.clone(),
-            name: object.name.clone(),
-            bounds: Rect {
-                x: 0.0,
-                y: 0.0,
-                width: bounds.width.max(1.0),
-                height: bounds.height.max(1.0),
-            },
-            position: object.position,
-        },
-    )?;
+    let intersections = workspace
+        .areas
+        .iter()
+        .enumerate()
+        .filter_map(|(index, area)| rect_intersection(area.bounds, object_rect).map(|rect| (index, rect)))
+        .collect::<Vec<_>>();
+    let mut first_layer_id = None;
+    for (ordinal, (area_index, intersection)) in intersections.into_iter().enumerate() {
+        let id = if ordinal == 0 {
+            layer_id.clone()
+        } else {
+            ObjectId::new(format!("{}-{}", layer_id.as_str(), ordinal + 1))
+                .expect("generated layer id should be valid")
+        };
+        let raster = crop_object_pixels(&decoded, &object, intersection);
+        let layer = raster_layer_from_pixels(id.clone(), &object.name, intersection, raster);
+        workspace.areas[area_index].layers.push(layer);
+        first_layer_id.get_or_insert(id);
+    }
     let image_object = require_object_mut(workspace, object_id)?;
-    image_object.rasterized_layer_id = Some(layer_id);
+    image_object.rasterized_layer_id = first_layer_id;
     Ok(())
 }
 
-fn raster_target_area_id(workspace: &mut Workspace, rect: Rect, name: &str) -> ObjectId {
-    if let Some(area) = workspace
+fn ensure_raster_target_areas(workspace: &mut Workspace, rect: Rect, name: &str) {
+    if workspace
         .areas
         .iter()
-        .find(|area| rects_intersect(area.bounds, rect))
+        .any(|area| rects_intersect(area.bounds, rect))
     {
-        return area.id.clone();
+        return;
     }
     let id = ObjectId::new(format!("area-{}", workspace.areas.len() + 1))
         .expect("generated area id should be valid");
@@ -306,7 +297,6 @@ fn raster_target_area_id(workspace: &mut Workspace, rect: Rect, name: &str) -> O
         tags: Vec::new(),
         preset_id: None,
     });
-    id
 }
 
 fn image_object_rect(object: &ImageObject) -> Rect {
@@ -320,6 +310,91 @@ fn image_object_rect(object: &ImageObject) -> Rect {
 
 fn rects_intersect(a: Rect, b: Rect) -> bool {
     a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+}
+
+fn rect_intersection(a: Rect, b: Rect) -> Option<Rect> {
+    let left = a.x.max(b.x);
+    let top = a.y.max(b.y);
+    let right = (a.x + a.width).min(b.x + b.width);
+    let bottom = (a.y + a.height).min(b.y + b.height);
+    (right > left && bottom > top).then_some(Rect {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    })
+}
+
+fn decoded_pixels_for_asset(asset: &Asset) -> ImageImportResult<DecodedImage> {
+    match &asset.source {
+        AssetSource::Linked { path } => decode_image_bytes(&fs::read(path)?),
+        AssetSource::Embedded { .. } => Err(ImageImportError::EmbeddedBytesUnavailable),
+    }
+}
+
+fn crop_object_pixels(decoded: &DecodedImage, object: &ImageObject, intersection: Rect) -> RasterPixels {
+    let width = intersection.width.ceil().max(1.0) as u32;
+    let height = intersection.height.ceil().max(1.0) as u32;
+    let mut pixels = vec![0; width as usize * height as usize * 4];
+    let source_width = decoded.metadata.width.max(1);
+    let source_height = decoded.metadata.height.max(1);
+    let scale_x = source_width as f32 / object.scale.width.max(1.0);
+    let scale_y = source_height as f32 / object.scale.height.max(1.0);
+
+    for y in 0..height {
+        for x in 0..width {
+            let workspace_x = intersection.x + x as f32;
+            let workspace_y = intersection.y + y as f32;
+            let source_x = ((workspace_x - object.position.x) * scale_x)
+                .floor()
+                .clamp(0.0, (source_width - 1) as f32) as u32;
+            let source_y = ((workspace_y - object.position.y) * scale_y)
+                .floor()
+                .clamp(0.0, (source_height - 1) as f32) as u32;
+            let src = ((source_y * source_width + source_x) * 4) as usize;
+            let dst = ((y * width + x) * 4) as usize;
+            pixels[dst..dst + 4].copy_from_slice(&decoded.rgba_pixels[src..src + 4]);
+        }
+    }
+
+    RasterPixels {
+        width,
+        height,
+        pixels,
+    }
+}
+
+fn raster_layer_from_pixels(
+    id: ObjectId,
+    name: &str,
+    bounds: Rect,
+    raster: RasterPixels,
+) -> Layer {
+    Layer {
+        id,
+        name: name.to_owned(),
+        visible: true,
+        opacity: 1.0,
+        locked: false,
+        position: Point {
+            x: bounds.x,
+            y: bounds.y,
+        },
+        bounds: Rect {
+            x: 0.0,
+            y: 0.0,
+            width: bounds.width.max(1.0),
+            height: bounds.height.max(1.0),
+        },
+        blend_mode: BlendMode::Normal,
+        alpha_channel: true,
+        transform: Transform::default(),
+        clipping: ClippingBehavior::None,
+        mask_layer_id: None,
+        group_id: None,
+        export_participation: ExportParticipation::Included,
+        raster: Some(raster),
+    }
 }
 
 /// Decode `bytes` and register them as an embedded asset on `package`, without
@@ -557,10 +632,13 @@ mod tests {
     #[test]
     fn duplicate_replace_and_rasterize_preserve_object_settings() {
         let mut workspace = workspace_with_asset("asset-a");
+        let path = temp_png_path();
         workspace.assets.push(Asset {
             id: id("asset-b"),
             name: "replacement.png".to_owned(),
-            source: AssetSource::Embedded { digest: None },
+            source: AssetSource::Linked {
+                path: path.to_string_lossy().into_owned(),
+            },
             media_type: Some("image/png".to_owned()),
             color_profile: None,
             image_metadata: Some(metadata()),
@@ -585,6 +663,9 @@ mod tests {
         assert_eq!(object.rasterized_layer_id, Some(id("layer")));
         assert_eq!(workspace.image_objects.len(), 2);
         assert_eq!(workspace.layers().count(), 1);
+        let raster = workspace.areas[0].layers[0].raster.as_ref().expect("raster");
+        assert_eq!(&raster.pixels[0..4], &[255, 0, 0, 255]);
+        let _ = fs::remove_file(path);
     }
 
     fn workspace() -> Workspace {

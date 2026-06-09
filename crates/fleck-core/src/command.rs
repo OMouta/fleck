@@ -3371,8 +3371,10 @@ mod tests {
         let registry = default_command_registry().expect("registry");
         let mut engine = CommandEngine::new();
         let mut workspace = Workspace::empty(id("workspace"));
-        workspace.assets.push(asset("asset-a"));
-        workspace.assets.push(asset("asset-b"));
+        let path_a = temp_png_path();
+        let path_b = temp_png_path();
+        workspace.assets.push(linked_asset("asset-a", &path_a));
+        workspace.assets.push(linked_asset("asset-b", &path_b));
 
         engine
             .execute(
@@ -3436,6 +3438,7 @@ mod tests {
 
         assert_eq!(workspace.image_objects.len(), 2);
         assert_eq!(workspace.layers().count(), 1);
+        assert!(workspace.areas[0].layers[0].raster.is_some());
         assert_eq!(workspace.image_objects[0].source_asset_id, id("asset-b"));
         assert_eq!(
             workspace.image_objects[0].position,
@@ -3443,6 +3446,8 @@ mod tests {
         );
 
         engine.undo(&mut workspace).expect("undo rasterize");
+        let _ = std::fs::remove_file(path_a);
+        let _ = std::fs::remove_file(path_b);
         assert!(workspace.layers().next().is_none());
         assert_eq!(workspace.image_objects[0].rasterized_layer_id, None);
     }
@@ -3719,11 +3724,13 @@ mod tests {
         }
     }
 
-    fn asset(value: &str) -> Asset {
+    fn linked_asset(value: &str, path: &std::path::Path) -> Asset {
         Asset {
             id: id(value),
             name: format!("{value}.png"),
-            source: AssetSource::Embedded { digest: None },
+            source: AssetSource::Linked {
+                path: path.to_string_lossy().into_owned(),
+            },
             media_type: Some("image/png".to_owned()),
             color_profile: None,
             image_metadata: Some(ImageAssetMetadata {
