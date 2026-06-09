@@ -16,15 +16,15 @@ It provides a flexible workspace for editing images, arranging assets, and expor
 
 ## Overview
 
-Fleck combines traditional raster editing with named areas.
+Fleck combines traditional raster editing with named areas that act as design and export containers.
 
-You can place images on a workspace, edit pixels directly, create export regions, and export those regions in different formats and sizes.
+You can place images on a workspace, create areas, edit each area's layer stack directly, and export those areas in different formats and sizes.
 
 ## Core features
 
 - Raster image editing
 - Infinite workspace
-- Layers
+- Per-area layers
 - Selections
 - Pixel editing
 - Text and shapes
@@ -37,17 +37,19 @@ You can place images on a workspace, edit pixels directly, create export regions
 
 ## Areas
 
-Areas are named regions of the workspace.
+Areas are named regions of the workspace that hold the editable design layers for that region.
 
-Each area can define its own output settings, including size, format, padding, background, filename, and export path.
+Each area has its own layer stack and can define output settings, including size, format, padding, background, filename, and export path.
 
 A workspace can contain multiple areas.
+
+Placed images remain workspace-level objects until rasterized. Rasterizing a linked image writes real pixels into every intersecting area; if the image does not intersect an area, Fleck creates one from the image bounds first.
 
 ## File format
 
 Fleck workspaces are saved as `.fleck` files.
 
-A workspace stores the canvas, layers, source images, areas, output settings, and document metadata.
+A workspace stores areas with their layers, source images, output settings, and document metadata.
 
 ## Status
 
